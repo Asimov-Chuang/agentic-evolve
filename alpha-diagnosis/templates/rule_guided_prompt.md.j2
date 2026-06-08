@@ -1,0 +1,32 @@
+{# Rule-guided injection section appended to base evolution prompt #}
+
+---
+
+## Critical diagnostic factors for algorithm improvement
+
+Through analysis of high-performing programs, we identified the following {{ rules|length }} behavioral patterns that are **crucial** for improving performance. A program that better satisfies these patterns tends to score significantly higher. Use them as design guidance when proposing new algorithms.
+
+**Important:** Treat each pattern below as an independent design principle. Do NOT assume any relative importance or weight among them — focus only on the behavioral content described.
+
+{% for rule in rules %}
+### Factor {{ loop.index }}: {{ rule.name }}
+{{ rule.description }}
+
+{% endfor %}
+---
+
+## Your task
+
+Based on the current best program ({{ best_attempt_id }} / best_program.py) as the starting baseline, **design and submit exactly {{ rules|length }} new algorithm variants** — one per factor above:
+
+{% for rule in rules %}
+{{ loop.index }}. **Algorithm {{ loop.index }}** — primarily targets Factor {{ loop.index }} ({{ rule.name }})
+{% endfor %}
+
+For each algorithm:
+- Start from the best program logic and make targeted changes to emphasize the corresponding factor's behavioral goal.
+- Each variant should be meaningfully different in how it implements that factor.
+- Write to candidate.py, run `python submit.py candidate.py`, and record the score.
+- After all {{ rules|length }} are submitted, briefly summarize which factors helped most based on the scores.
+
+Begin with Algorithm 1 now.

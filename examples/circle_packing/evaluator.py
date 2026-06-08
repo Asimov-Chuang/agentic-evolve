@@ -3,15 +3,26 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
 import os
 import subprocess
 import sys
 import tempfile
 import traceback
+from pathlib import Path
 
 NUM_CIRCLES = 26
 PENALTY_PER_VIOLATION = 10.0
+DEFAULT_PROGRAM_TIMEOUT_SECONDS = 60
+
+
+def _program_timeout_seconds() -> int:
+    meta_path = Path(__file__).resolve().parent / "workspace_meta.json"
+    if meta_path.is_file():
+        with open(meta_path, encoding="utf-8") as f:
+            return int(json.load(f).get("evaluation_timeout_seconds", DEFAULT_PROGRAM_TIMEOUT_SECONDS))
+    return DEFAULT_PROGRAM_TIMEOUT_SECONDS
 
 
 def evaluate(program_path: str, output_dir: str) -> dict:
@@ -46,6 +57,10 @@ def evaluate(program_path: str, output_dir: str) -> dict:
             "sum_radii": sum_radii,
             "num_circles": len(radii),
             "num_violations": num_violations,
+        },
+        "construction": {
+            "centers": [list(center) for center in centers],
+            "radii": list(radii),
         },
     }
 
@@ -83,7 +98,7 @@ except Exception:
             [sys.executable, script_path],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=_program_timeout_seconds(),
         )
         import pickle
 

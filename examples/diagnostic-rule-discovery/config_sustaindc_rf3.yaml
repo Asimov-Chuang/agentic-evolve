@@ -1,0 +1,22 @@
+project_name: diagnostic_rule_discovery_rf3
+maximize: true
+
+source_archive: ../sustaindc/outputs/sustaindc_rich_feedback_3/archive
+source_archive_top_n: 80
+rule_set_size: 8
+
+problem: sustaindc/problem.md
+initial_program: sustaindc/initial_program.py
+evaluator: sustaindc/evaluator.py
+
+agent_readable_evaluator: true
+max_improvements: 100
+agent_timeout_seconds: 3600
+evaluation_timeout_seconds: 600
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - --dangerously-skip-permissions

@@ -7,6 +7,14 @@ from pathlib import Path
 from typing import Optional
 
 
+def _dict_or_empty(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _json_safe(value):
+    return json.loads(json.dumps(value, default=str))
+
+
 @dataclass
 class Attempt:
     attempt_id: str
@@ -15,6 +23,9 @@ class Attempt:
     is_valid: bool
     feedback: str
     metrics: dict = field(default_factory=dict)
+    processed_feedback: str = ""
+    analysis_metrics: dict = field(default_factory=dict)
+    analysis: dict = field(default_factory=dict)
 
     @property
     def code_path(self) -> Path:
@@ -34,7 +45,10 @@ class Attempt:
             score=float(result["score"]),
             is_valid=bool(result["is_valid"]),
             feedback=str(result.get("feedback", "")),
-            metrics=dict(result.get("metrics") or {}),
+            metrics=_dict_or_empty(result.get("metrics")),
+            processed_feedback=str(result.get("processed_feedback", "")),
+            analysis_metrics=_dict_or_empty(result.get("analysis_metrics")),
+            analysis=_dict_or_empty(result.get("analysis")),
         )
 
 
@@ -65,8 +79,11 @@ class Archive:
             "score": float(result["score"]),
             "is_valid": bool(result["is_valid"]),
             "feedback": str(result.get("feedback", "")),
-            "metrics": dict(result.get("metrics") or {}),
+            "metrics": _dict_or_empty(result.get("metrics")),
         }
+        for key, value in result.items():
+            if key not in payload:
+                payload[key] = _json_safe(value)
         with open(attempt_dir / "result.json", "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
@@ -77,6 +94,9 @@ class Archive:
             is_valid=payload["is_valid"],
             feedback=payload["feedback"],
             metrics=payload["metrics"],
+            processed_feedback=str(payload.get("processed_feedback", "")),
+            analysis_metrics=_dict_or_empty(payload.get("analysis_metrics")),
+            analysis=_dict_or_empty(payload.get("analysis")),
         )
 
     def seed_initial(self, initial_program: Path, result: dict) -> Attempt:
@@ -107,9 +127,10 @@ class Archive:
         lines: list[str] = []
         for attempt in self.list_attempts():
             status = "valid" if attempt.is_valid else "invalid"
+            feedback = attempt.processed_feedback or attempt.feedback
             lines.append(
                 f"- {attempt.attempt_id}: score={attempt.score:.6f} ({status}) "
-                f"feedback={attempt.feedback}"
+                f"feedback={feedback}"
             )
         return lines
 

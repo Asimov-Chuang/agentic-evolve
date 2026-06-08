@@ -1,0 +1,5 @@
+task_id: general_meio
+trajectory_format: general_meio_raw_artifact
+rule_description_source: metrics.rule_descriptions
+prompt_template: templates/rule_guided_prompt.md.j2
+factor_label_style: numbered

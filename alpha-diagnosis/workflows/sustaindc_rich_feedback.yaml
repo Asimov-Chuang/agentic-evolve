@@ -1,0 +1,28 @@
+name: sustaindc_rf5_alpha
+adapter: adapters/sustaindc.yaml
+
+primary:
+  config: ../examples/sustaindc/config_rich_feedback.yaml
+  project_name: sustaindc_X
+
+stuck:
+  consecutive_no_improvement: 5
+  poll_interval_seconds: 5
+
+discovery:
+  task_dir: ../examples/diagnostic-rule-discovery/sustaindc
+  rule_set_size: 8
+  source_top_n: 30
+  runs: 1
+  max_improvements: 20
+  fresh_each_run: true
+
+injection:
+  mode: per_rule_variants
+  include_rule_weights: false
+  max_submissions: 8
+
+loop:
+  max_diagnosis_cycles: 10
+  resume_after_injection: true
+  auto_resume_on_early_exit: true

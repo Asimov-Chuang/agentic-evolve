@@ -14,6 +14,8 @@ class RunResult:
     stdout: str
     stderr: str
     error: str | None = None
+    pid: int | None = None
+    stopped_reason: str | None = None
 
 
 class OpenCodeRunner:
@@ -32,7 +34,14 @@ class OpenCodeRunner:
 
         return [self.command, *args, prompt]
 
-    def run(self, workspace_dir: str, prompt: str, timeout_seconds: int) -> RunResult:
+    def run(
+        self,
+        workspace_dir: str,
+        prompt: str,
+        timeout_seconds: int,
+        *,
+        pid_holder: list[int] | None = None,
+    ) -> RunResult:
         workspace = Path(workspace_dir).resolve()
         workspace.mkdir(parents=True, exist_ok=True)
 
@@ -47,8 +56,12 @@ class OpenCodeRunner:
 
         try:
             if self.verbose:
-                return self._run_streaming(cmd, workspace_str, stdout_path, stderr_path, timeout_seconds)
-            return self._run_captured(cmd, workspace_str, stdout_path, stderr_path, timeout_seconds)
+                return self._run_streaming(
+                    cmd, workspace_str, stdout_path, stderr_path, timeout_seconds, pid_holder
+                )
+            return self._run_captured(
+                cmd, workspace_str, stdout_path, stderr_path, timeout_seconds, pid_holder
+            )
         except FileNotFoundError:
             msg = f"Command not found: {self.command}"
             stdout_path.write_text("", encoding="utf-8")
@@ -68,22 +81,38 @@ class OpenCodeRunner:
         stdout_path: Path,
         stderr_path: Path,
         timeout_seconds: int,
+        pid_holder: list[int] | None = None,
     ) -> RunResult:
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 cmd,
                 cwd=workspace_dir,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout_seconds,
             )
-            stdout_path.write_text(completed.stdout or "", encoding="utf-8")
-            stderr_path.write_text(completed.stderr or "", encoding="utf-8")
+            pid = process.pid
+            if pid_holder is not None:
+                pid_holder.clear()
+                pid_holder.append(pid)
+            try:
+                stdout, stderr = process.communicate(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                process.kill()
+                stdout, stderr = process.communicate()
+                exc.stdout = stdout
+                exc.stderr = stderr
+                result = self._timeout_result(exc, stdout_path, stderr_path, timeout_seconds)
+                result.pid = pid
+                return result
+            stdout_path.write_text(stdout or "", encoding="utf-8")
+            stderr_path.write_text(stderr or "", encoding="utf-8")
             return RunResult(
-                success=completed.returncode == 0,
-                returncode=completed.returncode,
-                stdout=completed.stdout or "",
-                stderr=completed.stderr or "",
+                success=process.returncode == 0,
+                returncode=process.returncode or 0,
+                stdout=stdout or "",
+                stderr=stderr or "",
+                pid=pid,
             )
         except subprocess.TimeoutExpired as exc:
             return self._timeout_result(exc, stdout_path, stderr_path, timeout_seconds)
@@ -95,6 +124,7 @@ class OpenCodeRunner:
         stdout_path: Path,
         stderr_path: Path,
         timeout_seconds: int,
+        pid_holder: list[int] | None = None,
     ) -> RunResult:
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
@@ -109,6 +139,10 @@ class OpenCodeRunner:
                 stderr=subprocess.PIPE,
                 text=True,
             )
+            pid = process.pid
+            if pid_holder is not None:
+                pid_holder.clear()
+                pid_holder.append(pid)
 
             def pump(stream, log_file, chunks, out_stream):
                 assert stream is not None
@@ -154,6 +188,7 @@ class OpenCodeRunner:
                     stdout="".join(stdout_chunks),
                     stderr="".join(stderr_chunks),
                     error=msg,
+                    pid=pid,
                 )
 
             for thread in threads:
@@ -166,6 +201,7 @@ class OpenCodeRunner:
             returncode=returncode,
             stdout=stdout,
             stderr=stderr,
+            pid=pid,
         )
 
     def _timeout_result(

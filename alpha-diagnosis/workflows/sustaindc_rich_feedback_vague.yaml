@@ -1,0 +1,29 @@
+name: sustaindc_rf5_alpha_vague
+adapter: adapters/sustaindc.yaml
+
+primary:
+  config: ../examples/sustaindc/config_rich_feedback.yaml
+  project_name: sustaindc_rule_vague
+
+stuck:
+  consecutive_no_improvement: 5
+  poll_interval_seconds: 30
+
+discovery:
+  task_dir: ../examples/diagnostic-rule-discovery/sustaindc
+  rule_set_size: 8
+  source_top_n: 30
+  runs: 1
+  max_improvements: 30
+  fresh_each_run: true
+
+injection:
+  mode: per_rule_variants
+  include_rule_weights: false
+  max_submissions: 8
+  vague_rule_injection: true
+
+loop:
+  max_diagnosis_cycles: 5
+  resume_after_injection: true
+  auto_resume_on_early_exit: true

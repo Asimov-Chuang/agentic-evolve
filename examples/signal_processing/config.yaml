@@ -1,0 +1,21 @@
+project_name: signal_processing
+maximize: true
+
+problem: problem.md
+initial_program: initial_program.py
+evaluator: evaluator.py
+# analyzer: analyzer.py
+
+
+agent_readable_evaluator: false
+max_improvements: 500
+agent_timeout_seconds: 10800
+evaluation_timeout_seconds: 90
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - json
+    - --dangerously-skip-permissions

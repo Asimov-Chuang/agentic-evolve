@@ -1,0 +1,22 @@
+project_name: diagnostic_rule_discovery_general_meio_rf
+maximize: true
+
+source_archive: ../general_meio/outputs/general_meio_rich_feedback/archive
+source_archive_top_n: 30
+rule_set_size: 6
+
+problem: general_meio/problem.md
+initial_program: general_meio/initial_program.py
+evaluator: general_meio/evaluator.py
+
+agent_readable_evaluator: true
+max_improvements: 100
+agent_timeout_seconds: 3600
+evaluation_timeout_seconds: 600
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - --dangerously-skip-permissions

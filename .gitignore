@@ -1,4 +1,6 @@
 outputs/
+.DS_Store
+.registry.json
 __pycache__/
 *.egg-info/
 .eggs/

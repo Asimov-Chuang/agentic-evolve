@@ -1,0 +1,23 @@
+project_name: diagnostic_rule_discovery_TEMPLATE
+maximize: true
+
+# Set at runtime by alpha-diagnosis (absolute path to primary archive)
+source_archive: "{{PRIMARY_ARCHIVE}}"
+source_archive_top_n: 30
+rule_set_size: 8
+
+problem: problem.md
+initial_program: initial_program.py
+evaluator: evaluator.py
+
+agent_readable_evaluator: true
+max_improvements: 50
+agent_timeout_seconds: 3600
+evaluation_timeout_seconds: 600
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - --dangerously-skip-permissions

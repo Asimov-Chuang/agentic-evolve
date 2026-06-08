@@ -1,0 +1,28 @@
+name: general_meio_rf_alpha
+adapter: adapters/general_meio.yaml
+
+primary:
+  config: ../examples/general_meio/config_rich_feedback.yaml
+  project_name: general_meio_rule
+
+stuck:
+  consecutive_no_improvement: 5
+  poll_interval_seconds: 30
+
+discovery:
+  task_dir: ../examples/diagnostic-rule-discovery/general_meio
+  rule_set_size: 6
+  source_top_n: 30
+  runs: 1
+  max_improvements: 15
+  fresh_each_run: true
+
+injection:
+  mode: per_rule_variants
+  include_rule_weights: false
+  max_submissions: 6
+
+loop:
+  max_diagnosis_cycles: 5
+  resume_after_injection: true
+  auto_resume_on_early_exit: true

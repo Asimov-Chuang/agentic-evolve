@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 example = ["numpy>=1.20"]
+alpha-diagnosis = ["jinja2>=3.0", "matplotlib>=3.5"]
 
 [project.scripts]
 agentic-evolve = "agentic_evolve.cli:main"
