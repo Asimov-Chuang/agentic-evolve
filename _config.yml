@@ -1,0 +1,4 @@
+title: agentic-evolve
+markdown: kramdown
+include:
+  - .run_configs
