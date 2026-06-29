@@ -1,0 +1,25 @@
+name: sustaindc_wentian
+
+task:
+  base_config: examples/sustaindc/config_rich_feedback.yaml
+  project_name: sustaindc_wentian
+
+hub:
+  max_rounds: 30
+  agent_timeout_seconds: 180000
+  prompt_template: templates/hub_prompt.md.j2
+  max_plan_retries: 2
+
+subtasks:
+  defaults:
+    max_improvements: 20
+    agent_timeout_seconds: 36000
+  sequential: true      # subtask 逐个跑，不启线程池
+  max_parallel: 2     # 仅 sequential: false 时生效；Hub 每轮最多派几个
+
+global_archive:
+  top_n: 50
+
+loop:
+  resume: true
+  auto_resume_on_early_exit: true

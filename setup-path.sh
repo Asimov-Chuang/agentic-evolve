@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Add OpenCode to PATH for the current shell session.
-# Usage: source scripts/setup-path.sh
+# Usage: source setup-path.sh
 
 export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
 

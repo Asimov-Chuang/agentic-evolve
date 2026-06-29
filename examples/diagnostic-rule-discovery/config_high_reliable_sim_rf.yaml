@@ -1,0 +1,22 @@
+project_name: diagnostic_rule_discovery_hrs_rf
+maximize: true
+
+source_archive: ../high_reliable_simulation/outputs/high_reliable_simulation_rich_feedback/archive
+source_archive_top_n: 30
+rule_set_size: 6
+
+problem: high_reliable_simulation/problem.md
+initial_program: high_reliable_simulation/initial_program.py
+evaluator: high_reliable_simulation/evaluator.py
+
+agent_readable_evaluator: true
+max_improvements: 100
+agent_timeout_seconds: 3600
+evaluation_timeout_seconds: 600
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - --dangerously-skip-permissions

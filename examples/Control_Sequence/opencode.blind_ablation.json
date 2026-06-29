@@ -1,0 +1,221 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "cloudgpt": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "CloudGPT Chat",
+      "options": {
+        "baseURL": "http://127.0.0.1:8765/v1",
+        "apiKey": "local-proxy"
+      },
+      "models": {
+        "gpt-4o-20241120": {
+          "name": "GPT-4o",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "gpt-4o-mini-20240718": {
+          "name": "GPT-4o Mini",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "DeepSeek-V3.2": {
+          "name": "DeepSeek V3.2",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "DeepSeek-V4-Flash": {
+          "name": "DeepSeek V4 Flash",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "DeepSeek-V4-Pro": {
+          "name": "DeepSeek V4 Pro",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "grok-code-fast-1": {
+          "name": "Grok Code Fast",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "gpt-oss-20b": {
+          "name": "GPT-OSS 20B",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "gpt-oss-120b": {
+          "name": "GPT-OSS 120B",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        },
+        "gpt-5.4-mini-20260317": {
+          "name": "GPT-5.4 Mini",
+          "limit": {
+            "context": 200000,
+            "output": 32768
+          }
+        },
+        "gpt-5.4-nano-20260317": {
+          "name": "GPT-5.4 Nano",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        }
+      }
+    },
+    "cloudgpt-codex": {
+      "npm": "@ai-sdk/openai",
+      "name": "CloudGPT Codex",
+      "options": {
+        "baseURL": "http://127.0.0.1:8765/v1",
+        "apiKey": "local-proxy"
+      },
+      "models": {
+        "gpt-5.3-codex-20260224": {
+          "name": "GPT-5.3 Codex",
+          "limit": {
+            "context": 200000,
+            "output": 65536
+          }
+        },
+        "gpt-5.2-codex-20260114": {
+          "name": "GPT-5.2 Codex",
+          "limit": {
+            "context": 200000,
+            "output": 65536
+          }
+        },
+        "gpt-5.1-codex-20251113": {
+          "name": "GPT-5.1 Codex",
+          "limit": {
+            "context": 200000,
+            "output": 65536
+          }
+        },
+        "gpt-5.4-20260305": {
+          "name": "GPT-5.4",
+          "limit": {
+            "context": 200000,
+            "output": 65536
+          }
+        },
+        "gpt-5.4-pro-20260305": {
+          "name": "GPT-5.4 Pro",
+          "limit": {
+            "context": 200000,
+            "output": 65536
+          }
+        },
+        "gpt-5.4-mini-20260317": {
+          "name": "GPT-5.4 Mini",
+          "limit": {
+            "context": 200000,
+            "output": 32768
+          }
+        },
+        "gpt-5.4-nano-20260317": {
+          "name": "GPT-5.4 Nano",
+          "limit": {
+            "context": 128000,
+            "output": 16384
+          }
+        }
+      }
+    }
+  },
+  "model": "{env:CLOUDGPT_MODEL}",
+  "small_model": "{env:CLOUDGPT_SMALL_MODEL}",
+  "permission": {
+    "external_directory": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "task": "deny",
+    "read": {
+      "*": "deny",
+      "**/problem.md": "allow",
+      "**/candidate.py": "allow",
+      "**/best_program.py": "allow",
+      "**/initial_program.py": "allow",
+      "**/archive/*/code.py": "allow",
+      "**/archive/*/result.json": "allow",
+      "**/analyzer.py": "deny",
+      "**/_evaluator.py": "deny",
+      "**/submit.py": "deny",
+      "**/_analyzer_runner.py": "deny",
+      "**/_registry.py": "deny",
+      "**/workspace_meta.json": "deny",
+      "**/checkpoint.json": "deny"
+    },
+    "edit": {
+      "*": "deny",
+      "candidate.py": "allow",
+      "**/candidate.py": "allow"
+    },
+    "glob": {
+      "*": "allow",
+      "**/analyzer.py": "deny",
+      "**/_evaluator.py": "deny",
+      "**/submit.py": "deny",
+      "**/_analyzer_runner.py": "deny",
+      "**/_registry.py": "deny",
+      "**/workspace_meta.json": "deny",
+      "**/checkpoint.json": "deny"
+    },
+    "grep": {
+      "*": "allow",
+      "**/analyzer.py": "deny",
+      "**/_evaluator.py": "deny",
+      "**/submit.py": "deny",
+      "NOISE_RATIO": "deny",
+      "evaluator_core": "deny"
+    },
+    "bash": {
+      "*": "deny",
+      "python submit.py *": "allow",
+      "python3 submit.py *": "allow",
+      "ls*": "allow",
+      "pwd": "allow",
+      "echo *": "allow",
+      "cat *problem.md*": "allow",
+      "cat *candidate.py*": "allow",
+      "cat *best_program.py*": "allow",
+      "cat *initial_program.py*": "allow",
+      "cat *archive/*/code.py*": "allow",
+      "cat *archive/*/result.json*": "allow",
+      "head *problem.md*": "allow",
+      "head *candidate.py*": "allow",
+      "head *archive/*/*": "allow",
+      "cat *analyzer.py*": "deny",
+      "cat *submit.py*": "deny",
+      "cat *_evaluator.py*": "deny",
+      "cat *workspace_meta.json*": "deny",
+      "cat *checkpoint.json*": "deny",
+      "cat *_analyzer*": "deny",
+      "cat *_registry.py*": "deny",
+      "head *analyzer.py*": "deny",
+      "head *submit.py*": "deny",
+      "head *_evaluator.py*": "deny",
+      "less *": "deny",
+      "cd ..*": "deny",
+      "cd ../..*": "deny"
+    }
+  }
+}

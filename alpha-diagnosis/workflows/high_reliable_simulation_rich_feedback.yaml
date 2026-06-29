@@ -1,0 +1,28 @@
+name: high_reliable_simulation_rf_alpha
+adapter: adapters/high_reliable_simulation.yaml
+
+primary:
+  config: ../examples/high_reliable_simulation/config_rich_feedback.yaml
+  project_name: high_reliable_simulation_X
+
+stuck:
+  consecutive_no_improvement: 8
+  poll_interval_seconds: 5
+
+discovery:
+  task_dir: ../examples/diagnostic-rule-discovery/high_reliable_simulation
+  rule_set_size: 6
+  source_top_n: 30
+  runs: 1
+  max_improvements: 20
+  fresh_each_run: true
+
+injection:
+  mode: per_rule_variants
+  include_rule_weights: false
+  max_submissions: 6
+
+loop:
+  max_diagnosis_cycles: 10
+  resume_after_injection: true
+  auto_resume_on_early_exit: true

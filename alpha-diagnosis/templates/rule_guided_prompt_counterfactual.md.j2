@@ -1,0 +1,127 @@
+{# Counterfactual mode-detection injection: trajectory evidence + exemplar code #}
+
+
+
+---
+
+
+
+## Counterfactual diagnostic injection (cycle {{ cycle }})
+
+
+
+Regression discovery found {{ rules|length }} trajectory **modes**. For each mode below you get:
+
+
+
+1. **What the baseline did** on real trajectories (episode/step metrics).
+
+2. **A counterfactual exemplar** — a higher-scoring archive attempt that behaves differently.
+
+3. **Exemplar code excerpt** — borrow structural ideas, not literal copy-paste.
+
+
+
+Baseline: **{{ baseline_attempt_id }}**{% if baseline_score is not none %} (score {{ "%.4f"|format(baseline_score) }}){% endif %}
+
+
+
+{% if warnings %}
+
+**Warnings:**
+
+{% for w in warnings %}
+
+- {{ w }}
+
+{% endfor %}
+
+{% endif %}
+
+
+
+{% for pair in counterfactual_pairs %}
+
+### Mode {{ loop.index }}: {{ pair.rule_name }}
+
+{% if include_rule_weights and pair.score_effect == "positive" %}
+
+**Association (positive):** presence tends to correlate with higher scores.
+
+{% elif include_rule_weights and pair.score_effect == "negative" %}
+
+**Association (negative):** presence tends to correlate with lower scores — design to avoid.
+
+{% endif %}
+
+{{ pair.rule_description }}
+
+
+
+**Counterfactual evidence**
+
+```
+
+{{ pair.narrative }}
+
+```
+
+
+
+**Action for Variant {{ loop.index }}:** {{ pair.action_hint }}
+
+
+
+{% if pair.exemplar_attempt_id != "none" %}
+
+**Exemplar** `{{ pair.exemplar_attempt_id }}` (score {{ "%.4f"|format(pair.exemplar_score) }}) — code excerpt:
+
+```python
+
+{{ pair.code_excerpt }}
+
+```
+
+{% endif %}
+
+
+
+{% endfor %}
+
+---
+
+
+
+## Your task
+
+
+
+From **{{ baseline_attempt_id }}** / `best_program.py`, submit **exactly {{ rules|length }} variants** — one per mode above.
+
+
+
+{% for pair in counterfactual_pairs %}
+
+{{ loop.index }}. **Variant {{ loop.index }}** — fix mode `{{ pair.rule_name }}` using the counterfactual evidence (match exemplar trajectory response at the cited episode/step, adapted to your controller).
+
+{% endfor %}
+
+
+
+**Hard constraints**
+
+- Start from the baseline controller; do not restart from scratch.
+
+- Each variant must address its mode using the **counterfactual trajectory contrast**, not only the mode label.
+
+- When association is **negative**, your variant must **reduce** that failure mode on the baseline (do not add the failure to "demonstrate" the mode).
+
+- When association is **positive**, your variant must **add or strengthen** the success signature the exemplar shows.
+
+- Write `candidate.py`, run `python submit.py candidate.py`, record the score.
+
+- After all {{ rules|length }} variants, summarize which counterfactuals helped.
+
+
+
+Begin with Variant 1 now.

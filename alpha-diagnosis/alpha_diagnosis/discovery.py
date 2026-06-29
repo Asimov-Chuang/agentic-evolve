@@ -11,6 +11,7 @@ from agentic_evolve.archive import Archive
 from agentic_evolve.checkpoint import load_checkpoint
 from agentic_evolve.cli import run_evolution
 from agentic_evolve.config import load_config
+from agentic_evolve.r2_monitor import best_r2_in_archive, is_r2_threshold_met
 from agentic_evolve.score_trajectory import record_event
 
 from alpha_diagnosis.config_schema import WorkflowConfig
@@ -28,10 +29,17 @@ def _discovery_trajectory_fields(config) -> dict:
     }
 
 
-def _should_auto_resume_discovery(config, *, auto_resume: bool) -> bool:
+def _should_auto_resume_discovery(
+    config,
+    *,
+    auto_resume: bool,
+    r2_threshold: float | None = None,
+) -> bool:
     if not auto_resume:
         return False
     archive = Archive(config.archive_dir, config.maximize)
+    if r2_threshold is not None and is_r2_threshold_met(archive, r2_threshold):
+        return False
     if archive.remaining_improvements(config.max_improvements) <= 0:
         return False
     checkpoint = load_checkpoint(config.workspace_dir)
@@ -44,6 +52,8 @@ def _run_discovery_until_done(
     verbose: bool,
     fresh: bool,
     auto_resume: bool,
+    r2_threshold: float | None = None,
+    poll_interval_seconds: int = 30,
 ) -> int:
     """Run discovery with optional auto-resume when the agent exits early."""
     session_resume = False
@@ -54,12 +64,29 @@ def _run_discovery_until_done(
             verbose=verbose,
             fresh=use_fresh,
             resume=session_resume,
+            r2_early_stop_threshold=r2_threshold,
+            poll_interval_seconds=poll_interval_seconds,
         )
         if rc != 0:
             return rc
 
         config = load_config(cfg_path)
-        if not _should_auto_resume_discovery(config, auto_resume=auto_resume):
+        if not _should_auto_resume_discovery(
+            config,
+            auto_resume=auto_resume,
+            r2_threshold=r2_threshold,
+        ):
+            if (
+                verbose
+                and r2_threshold is not None
+                and is_r2_threshold_met(Archive(config.archive_dir, config.maximize), r2_threshold)
+            ):
+                best_r2 = best_r2_in_archive(Archive(config.archive_dir, config.maximize))
+                print(
+                    f"discovery: R² threshold reached (best R²={best_r2:.4f} >= {r2_threshold:.4f}); "
+                    "proceeding to injection.",
+                    flush=True,
+                )
             return rc
 
         if verbose:
@@ -100,6 +127,10 @@ def _write_discovery_config(
 ) -> None:
     assert workflow.discovery is not None
     dcfg = workflow.discovery
+    if dcfg.task_dir is None:
+        raise ValueError(
+            f"discovery.task_dir is required for discovery mode {dcfg.mode!r}"
+        )
     template_path = dcfg.task_dir / "config.template.yaml"
     if template_path.is_file():
         with open(template_path, encoding="utf-8") as f:
@@ -128,6 +159,9 @@ def _write_discovery_config(
     raw["problem"] = str((dcfg.task_dir / "problem.md").resolve())
     raw["initial_program"] = str((dcfg.task_dir / "initial_program.py").resolve())
     raw["evaluator"] = str((dcfg.task_dir / "evaluator.py").resolve())
+
+    if dcfg.mode == "algorithm_based_rule":
+        raw["discovery_sample_type"] = "code"
 
     output_config_path.parent.mkdir(parents=True, exist_ok=True)
     output_config_path.write_text(yaml.dump(raw, sort_keys=False), encoding="utf-8")
@@ -161,6 +195,8 @@ def run_discovery_cycle(
             verbose=verbose,
             fresh=fresh,
             auto_resume=workflow.loop.auto_resume_on_early_exit,
+            r2_threshold=dcfg.early_injection_r2_threshold,
+            poll_interval_seconds=workflow.stuck.poll_interval_seconds,
         )
 
         disc_cfg = load_config(cfg_path)
@@ -194,8 +230,27 @@ def save_discovery_artifact(primary_workspace: Path, result: DiscoveryResult) ->
         "best_attempt_id": result.best_attempt_id,
         "best_score": result.best_score,
         "rules": [
-            {"index": r.index, "name": r.name, "description": r.description} for r in result.rules
+            {
+                "index": r.index,
+                "name": r.name,
+                "description": r.description,
+                "score_effect": r.score_effect,
+            }
+            for r in result.rules
         ],
     }
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    rule_src = (
+        result.workspace_dir
+        / "archive"
+        / result.best_attempt_id
+        / "code.py"
+    )
+    if rule_src.is_file():
+        rule_dst_dir = primary_workspace / "alpha-diagnosis" / "rule_programs"
+        rule_dst_dir.mkdir(parents=True, exist_ok=True)
+        rule_dst = rule_dst_dir / f"cycle_{result.cycle:02d}.py"
+        rule_dst.write_text(rule_src.read_text(encoding="utf-8"), encoding="utf-8")
+
     return out

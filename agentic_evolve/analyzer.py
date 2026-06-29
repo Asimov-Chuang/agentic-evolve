@@ -17,6 +17,7 @@ def run_analyzer(
     archive_dir: Path,
     workspace_dir: Path,
     timeout_seconds: int,
+    max_feedback_lines: int | None = None,
 ) -> dict:
     if not analyzer_path.is_file():
         return {}
@@ -31,10 +32,13 @@ def run_analyzer(
             workspace_dir=workspace_dir,
             timeout_seconds=timeout_seconds,
         )
-        return _normalize_analysis(payload)
+        return _normalize_analysis(payload, max_feedback_lines=max_feedback_lines)
     except Exception as exc:
         return {
-            "processed_feedback": f"Analyzer failed: {exc}",
+            "processed_feedback": _limit_feedback_lines(
+                f"Analyzer failed: {exc}",
+                max_feedback_lines,
+            ),
             "analysis_metrics": {},
             "analysis": {"error": str(exc)},
         }
@@ -113,24 +117,27 @@ except Exception:
         Path(script_path).unlink(missing_ok=True)
 
 
-def _normalize_analysis(payload: Any) -> dict:
+def _normalize_analysis(payload: Any, *, max_feedback_lines: int | None = None) -> dict:
     if payload is None:
         return {}
     if isinstance(payload, str):
         return {
-            "processed_feedback": payload,
+            "processed_feedback": _limit_feedback_lines(payload, max_feedback_lines),
             "analysis_metrics": {},
         }
     if not isinstance(payload, dict):
         return {
-            "processed_feedback": str(payload),
+            "processed_feedback": _limit_feedback_lines(str(payload), max_feedback_lines),
             "analysis_metrics": {},
         }
 
     normalized: dict[str, Any] = {}
     processed_feedback = payload.get("processed_feedback", payload.get("feedback", ""))
     if processed_feedback:
-        normalized["processed_feedback"] = str(processed_feedback)
+        normalized["processed_feedback"] = _limit_feedback_lines(
+            str(processed_feedback),
+            max_feedback_lines,
+        )
 
     metrics = payload.get("analysis_metrics", payload.get("metrics", {}))
     normalized["analysis_metrics"] = _as_dict(metrics)
@@ -158,3 +165,19 @@ def _as_dict(value: Any) -> dict:
 
 def _json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
+
+
+def _limit_feedback_lines(text: str, max_lines: int | None) -> str:
+    if max_lines is None:
+        return text
+    if max_lines < 1:
+        return ""
+
+    lines = text.splitlines()
+    if len(lines) <= max_lines:
+        return text
+
+    marker = f"... [truncated; showing {max_lines} of {len(lines)} lines]"
+    if max_lines == 1:
+        return marker
+    return "\n".join([*lines[: max_lines - 1], marker])

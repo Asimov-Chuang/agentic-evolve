@@ -4,38 +4,18 @@ import argparse
 import sys
 from pathlib import Path
 
-from agentic_evolve.archive import Archive, save_best_program
+from agentic_evolve.archive import Archive, read_improvement_baseline, save_best_program
 from agentic_evolve.checkpoint import (
-    Checkpoint,
     format_checkpoint_summary,
+    has_resumable_archive,
     list_named_checkpoints,
     load_checkpoint,
-    save_checkpoint,
     save_named_checkpoint,
+    save_run_checkpoint,
 )
 from agentic_evolve.config import load_config
-from agentic_evolve.opencode_runner import OpenCodeRunner
-from agentic_evolve.prompt_builder import build_prompt
-from agentic_evolve.score_trajectory import record_event, sync_archive_to_trajectory
-from agentic_evolve.workspace import setup_workspace
-
-
-def _save_run_checkpoint(
-    config_path: str,
-    config,
-    archive: Archive,
-    status: str,
-) -> None:
-    checkpoint = Checkpoint.from_archive(
-        archive,
-        project_name=config.project_name,
-        maximize=config.maximize,
-        max_improvements=config.max_improvements,
-        evaluation_timeout_seconds=config.evaluation_timeout_seconds,
-        config_path=str(Path(config_path).resolve()),
-        status=status,
-    )
-    save_checkpoint(checkpoint, config.workspace_dir)
+from agentic_evolve.score_trajectory import sync_archive_to_trajectory
+from agentic_evolve.session import run_evolution_until_done
 
 
 def run_evolution(
@@ -45,6 +25,8 @@ def run_evolution(
     resume: bool = False,
     fresh: bool = False,
     from_checkpoint: str | None = None,
+    r2_early_stop_threshold: float | None = None,
+    poll_interval_seconds: int = 30,
 ) -> int:
     config = load_config(config_path)
     if verbose is not None:
@@ -54,11 +36,8 @@ def run_evolution(
         print("error: --fresh cannot be combined with --resume or --from-checkpoint", file=sys.stderr)
         return 1
 
-    workspace, archive, resumed = setup_workspace(
-        config,
-        fresh=fresh,
-        from_checkpoint=from_checkpoint,
-    )
+    archive = Archive(config.archive_dir, config.maximize)
+    resumed = has_resumable_archive(config.archive_dir)
 
     if resumed and not resume and not from_checkpoint and not fresh:
         print(
@@ -71,7 +50,8 @@ def run_evolution(
             print("\n" + format_checkpoint_summary(existing, archive), file=sys.stderr)
         return 1
 
-    remaining = archive.remaining_improvements(config.max_improvements)
+    baseline = read_improvement_baseline(config.workspace_dir)
+    remaining = archive.remaining_improvements(config.max_improvements, baseline=baseline)
     best = archive.best()
     best_score = f"{best.score:.6f}" if best else "N/A"
 
@@ -89,7 +69,7 @@ def run_evolution(
             maximize=config.maximize,
             event="backfill",
         )
-        _save_run_checkpoint(config_path, config, archive, status="completed")
+        save_run_checkpoint(config_path, config, archive, status="completed")
         save_best_program(archive, config.best_program_path, config.initial_program)
         print(f"Saved best program to {config.best_program_path}")
         return 0
@@ -100,67 +80,36 @@ def run_evolution(
         maximize=config.maximize,
         event="backfill",
     )
-    best = archive.best()
-    record_event(
-        config.workspace_dir,
-        "session_start",
-        mode=mode,
-        best_so_far=best.score if best else None,
-        best_attempt_id=best.attempt_id if best else None,
-        attempt_count=archive.submission_count(),
-        remaining=remaining,
+
+    evo = run_evolution_until_done(
+        config_path,
+        resume=resume,
+        fresh=fresh,
+        from_checkpoint=from_checkpoint,
+        verbose=bool(config.verbose),
+        auto_resume=config.auto_resume_on_early_exit,
+        r2_threshold=r2_early_stop_threshold,
+        poll_interval_seconds=poll_interval_seconds,
     )
 
-    _save_run_checkpoint(config_path, config, archive, status="running")
+    archive = evo["archive"]
+    config = evo["config"]
+    result = evo.get("result")
+    if (
+        result is not None
+        and not result.success
+        and result.error
+        and result.stopped_reason != "r2_threshold"
+    ):
+        print(f"agent warning: {result.error}", file=sys.stderr)
+    elif result is not None and result.stopped_reason == "r2_threshold" and result.error:
+        print(result.error)
 
-    prompt = build_prompt(
-        archive,
-        workspace,
-        config.max_improvements,
-        resumed=resumed,
-        hidden_testdata=config.hidden_testdata,
-        agent_readable_evaluator=config.agent_readable_evaluator,
-    )
-    if config.verbose:
-        print("\n--- agent trace ---", flush=True)
-        print(f"workspace: {workspace}", flush=True)
-        print(f"archive attempts: {archive.submission_count()}", flush=True)
-        print(f"remaining improvements: {remaining}", flush=True)
-
-    runner = OpenCodeRunner(
-        command=config.opencode.command,
-        args=config.opencode.resolved_args(),
-        verbose=config.verbose,
-    )
-    agent_result = runner.run(
-        workspace_dir=str(workspace),
-        prompt=prompt,
-        timeout_seconds=config.agent_timeout_seconds,
-    )
-    if not agent_result.success and agent_result.error:
-        print(f"agent warning: {agent_result.error}", file=sys.stderr)
-
-    archive = Archive(config.archive_dir, config.maximize)
     attempts = archive.list_attempts()
     best = archive.best()
-    remaining = archive.remaining_improvements(config.max_improvements)
-    status = "completed" if remaining <= 0 else "paused"
-    sync_archive_to_trajectory(
-        config.workspace_dir,
-        config.archive_dir,
-        maximize=config.maximize,
-    )
-    record_event(
-        config.workspace_dir,
-        "session_end",
-        status=status,
-        stopped_reason=agent_result.stopped_reason,
-        best_so_far=best.score if best else None,
-        best_attempt_id=best.attempt_id if best else None,
-        attempt_count=archive.submission_count(),
-        remaining=remaining,
-    )
-    _save_run_checkpoint(config_path, config, archive, status=status)
+    baseline = read_improvement_baseline(config.workspace_dir)
+    remaining = archive.remaining_improvements(config.max_improvements, baseline=baseline)
+    status = evo["status"]
 
     print(f"\nFinished: {len(attempts)} attempt(s) in archive")
     for attempt in attempts:
@@ -209,7 +158,7 @@ def checkpoint_save(config_path: str, name: str) -> int:
         print("No archive to save.", file=sys.stderr)
         return 1
 
-    _save_run_checkpoint(config_path, config, archive, status="paused")
+    save_run_checkpoint(config_path, config, archive, status="paused")
     dest = save_named_checkpoint(config.workspace_dir, name)
     print(f"Saved checkpoint '{name}' to {dest}")
     return 0

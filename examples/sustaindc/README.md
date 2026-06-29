@@ -8,6 +8,7 @@ This example uses agentic-evolve's **analyzer toggle** to switch feedback modes 
 |--------|-----------|------------------------|
 | [`config.yaml`](config.yaml) (`project_name: sustaindc_score_only`) | `outputs/sustaindc_score_only/` | Score-only: `feedback: "Score: X.XXXX"` |
 | [`config_rich_feedback.yaml`](config_rich_feedback.yaml) (`project_name: sustaindc_rich_feedback`) | `outputs/sustaindc_rich_feedback/` | Rich: `processed_feedback` with scenario scores + diagnosis |
+| [`config_pro.yaml`](config_pro.yaml) (`project_name: sustaindc_pro`) | `outputs/sustaindc_pro/` | PRO: co-evolve analyzer + policy from raw-artifact |
 
 [`problem.md`](problem.md) sections 1–15 match Frontier-Engineering `hand_written_control/Task.md` verbatim; section 16 adds agentic-evolve submit/archive notes.
 
@@ -70,6 +71,20 @@ Rich feedback (analyzer enabled):
 agentic-evolve run examples/sustaindc/config_rich_feedback.yaml
 ```
 
+PRO mode (co-evolve analyzer + policy):
+
+```bash
+agentic-evolve run examples/sustaindc/config_pro.yaml
+agentic-evolve run --resume examples/sustaindc/config_pro.yaml
+```
+
+Test analyzer changes without re-submitting:
+
+```bash
+cd outputs/sustaindc_pro
+python rerun_analyzer.py attempt_0001
+```
+
 Resume / fresh:
 
 ```bash
@@ -99,6 +114,7 @@ Frontier simulation subprocesses are independent; the only shared resource is th
 examples/sustaindc/
   config.yaml                 # score-only (default)
   config_rich_feedback.yaml   # rich feedback via analyzer
+  config_pro.yaml             # PRO mode: co-evolve analyzer + policy
   problem.md                  # Task.md-aligned problem statement (sections 1–15)
   initial_program.py          # seed policy (decide_actions)
   evaluator.py                # subprocess bridge to Frontier evaluate.py

@@ -1,0 +1,26 @@
+name: sustaindc_rf5_agent_review
+adapter: adapters/sustaindc.yaml
+
+primary:
+  config: ../examples/sustaindc/config_rich_feedback.yaml
+  project_name: sustaindc_X_ar
+
+stuck:
+  consecutive_no_improvement: 8
+  poll_interval_seconds: 5
+
+discovery:
+  mode: agent_review
+  rule_set_size: 8
+  source_top_n: 30
+  agent_timeout_seconds: 1800
+
+injection:
+  mode: per_rule_variants
+  include_rule_weights: false
+  max_submissions: 8
+
+loop:
+  max_diagnosis_cycles: 10
+  resume_after_injection: true
+  auto_resume_on_early_exit: true

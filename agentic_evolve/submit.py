@@ -101,46 +101,13 @@ def _json_safe(value):
     return json.loads(json.dumps(value, default=str))
 
 
-# Large evaluator extras (e.g. packing coordinates) are kept in result.json
-# but omitted from stdout so the agent sees a compact summary.
-_AGENT_DISPLAY_OMIT_KEYS = frozenset({"construction", "per_case"})
-
-# Keys stripped from result.json and written as sidecar files in the attempt dir.
-_RESULT_SIDECAR_KEYS: dict[str, str] = {
-    "raw_artifacts": "raw-artifact.json",
-    "stepwise_raw_artifacts": "raw-artifact.json",
-}
-
-
-def _result_for_agent_display(payload: dict) -> dict:
-    return {key: value for key, value in payload.items() if key not in _AGENT_DISPLAY_OMIT_KEYS}
-
-
-def _strip_construction_stepwise(construction: Any) -> Any:
-    if not isinstance(construction, dict):
-        return construction
-    cleaned = dict(construction)
-    cleaned.pop("stepwise_raw_artifacts", None)
-    return cleaned
-
-
-def _persist_result_sidecars(attempt_dir: Path, payload: dict) -> None:
-    for key, filename in _RESULT_SIDECAR_KEYS.items():
-        if key not in payload:
-            continue
-        sidecar_path = attempt_dir / filename
-        with open(sidecar_path, "w", encoding="utf-8") as f:
-            json.dump(_json_safe(payload.pop(key)), f, indent=2)
-        break
-
-    if "construction" in payload:
-        payload["construction"] = _strip_construction_stepwise(payload["construction"])
+from agentic_evolve.result_sidecars import finalize_attempt_result, result_for_agent_display
 
 
 def _next_attempt_dir(archive_dir: Path) -> Path:
-    existing = sorted(archive_dir.glob("attempt_*"))
-    attempt_id = f"attempt_{len(existing):04d}"
-    attempt_dir = archive_dir / attempt_id
+    from agentic_evolve.archive import next_attempt_id_for_dir
+
+    attempt_dir = archive_dir / next_attempt_id_for_dir(archive_dir)
     attempt_dir.mkdir(parents=True, exist_ok=False)
     return attempt_dir
 
@@ -243,8 +210,14 @@ def main(argv: list[str] | None = None) -> int:
     archive_dir = workspace / "archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
 
-    submissions_after_seed = max(0, len(list(archive_dir.glob("attempt_*"))) - 1)
+    try:
+        from agentic_evolve.archive import read_improvement_baseline
+
+        baseline = read_improvement_baseline(workspace)
+    except ModuleNotFoundError:
+        baseline = int(meta.get("improvement_baseline_count", 1))
     max_improvements = int(meta.get("max_improvements", 10))
+    submissions_after_seed = max(0, len(list(archive_dir.glob("attempt_*"))) - baseline)
     if submissions_after_seed >= max_improvements:
         print(
             f"Improvement budget exhausted ({max_improvements} submissions). "
@@ -276,19 +249,25 @@ def main(argv: list[str] | None = None) -> int:
             archive_dir=archive_dir,
             workspace_dir=workspace,
             timeout_seconds=int(meta.get("evaluation_timeout_seconds", 60)),
+            max_feedback_lines=meta.get("analyzer_max_feedback_lines"),
         )
         result.update(analysis)
 
     payload = _normalize_evaluation_result(result)
     if meta.get("hidden_testdata"):
         payload.pop("per_case", None)
-    _persist_result_sidecars(attempt_dir, payload)
+    store_raw_artifacts = bool(meta.get("store_raw_artifacts", True))
+    payload = finalize_attempt_result(
+        attempt_dir,
+        payload,
+        store_raw_artifacts=store_raw_artifacts,
+    )
     with open(attempt_dir / "result.json", "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
     _record_score_trajectory(workspace, archive_dir, attempt_dir, meta)
 
-    print(json.dumps(_result_for_agent_display(payload), indent=2))
+    print(json.dumps(result_for_agent_display(payload), indent=2))
     print(f"Archived to {attempt_dir.name}/", file=sys.stderr)
     return 0
 

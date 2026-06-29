@@ -1,0 +1,32 @@
+name: optics_temporal_smooth_algorithm_rule
+adapter: adapters/adaptive_temporal_smooth_control.yaml
+store_raw_artifacts: false
+
+primary:
+  config: ../examples/adaptive_temporal_smooth_control/config_rich_feedback.yaml
+  project_name: optics_temporal_smooth_AD
+
+stuck:
+  consecutive_no_improvement: 10
+  poll_interval_seconds: 5
+  min_attempts_before_stuck: 30
+
+discovery:
+  mode: algorithm_based_rule
+  task_dir: ../examples/algorithm-rule-discovery/adaptive_temporal_smooth_control
+  rule_set_size: 8
+  source_top_n: 20
+  runs: 1
+  max_improvements: 20
+  fresh_each_run: true
+  early_injection_r2_threshold: 0.99
+
+injection:
+  mode: per_rule_variants
+  include_rule_weights: false
+  max_submissions: 10
+
+loop:
+  max_diagnosis_cycles: 10
+  resume_after_injection: true
+  auto_resume_on_early_exit: true

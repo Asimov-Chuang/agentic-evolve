@@ -63,6 +63,11 @@ def consecutive_no_improvement(
     return streak
 
 
+def session_submission_count(archive: Archive, session_baseline_count: int) -> int:
+    """Agent submissions in the current evolution session (after baseline)."""
+    return max(0, archive.submission_count() - max(0, session_baseline_count))
+
+
 def is_stuck(
     archive: Archive,
     cfg: StuckConfig,
@@ -70,6 +75,8 @@ def is_stuck(
     *,
     session_baseline_count: int = 0,
 ) -> bool:
+    if session_submission_count(archive, session_baseline_count) < cfg.min_attempts_before_stuck:
+        return False
     return (
         consecutive_no_improvement(
             archive,
@@ -102,6 +109,9 @@ def run_with_stuck_monitor(
     cfg: StuckConfig,
     *,
     session_baseline_count: int = 0,
+    continue_session: bool = False,
+    session_id: str | None = None,
+    append_logs: bool = False,
 ) -> RunResult:
     pid_holder: list[int] = []
     result_holder: list[RunResult] = []
@@ -111,7 +121,15 @@ def run_with_stuck_monitor(
 
     def _run():
         result_holder.append(
-            runner.run(workspace_dir, prompt, timeout_seconds, pid_holder=pid_holder)
+            runner.run(
+                workspace_dir,
+                prompt,
+                timeout_seconds,
+                pid_holder=pid_holder,
+                continue_session=continue_session,
+                session_id=session_id,
+                append_logs=append_logs,
+            )
         )
 
     thread = threading.Thread(target=_run, daemon=True)
@@ -140,7 +158,9 @@ def run_with_stuck_monitor(
                 "stuck",
                 consecutive_no_improvement=streak,
                 threshold=cfg.consecutive_no_improvement,
+                min_attempts_before_stuck=cfg.min_attempts_before_stuck,
                 session_baseline_count=session_baseline_count,
+                session_submissions=session_submission_count(archive, session_baseline_count),
                 best_so_far=best.score if best else None,
                 best_attempt_id=best.attempt_id if best else None,
                 attempt_count=archive.submission_count(),
@@ -166,4 +186,112 @@ def run_with_stuck_monitor(
         result.success = False
         if not result.error:
             result.error = "Stopped: score stuck"
+    return result
+
+
+def injection_submission_count(archive: Archive, injection_start_count: int) -> int:
+    return max(0, archive.submission_count() - injection_start_count)
+
+
+def is_injection_quota_reached(
+    archive: Archive,
+    injection_start_count: int,
+    rule_count: int,
+    *,
+    quota_tolerance: int = 0,
+) -> bool:
+    submitted = injection_submission_count(archive, injection_start_count)
+    return submitted >= rule_count + quota_tolerance
+
+
+def run_with_injection_quota_monitor(
+    runner: OpenCodeRunner,
+    workspace_dir: str,
+    prompt: str,
+    timeout_seconds: int,
+    archive_dir: Path,
+    maximize: bool,
+    *,
+    poll_interval_seconds: int,
+    injection_start_count: int,
+    rule_count: int,
+    quota_tolerance: int = 2,
+    continue_session: bool = False,
+    session_id: str | None = None,
+    append_logs: bool = False,
+) -> RunResult:
+    """Poll archive during rule injection and terminate when quota + tolerance is met."""
+    pid_holder: list[int] = []
+    result_holder: list[RunResult] = []
+    stop_event = threading.Event()
+    workspace = Path(workspace_dir).resolve()
+    watcher = TrajectoryWatcher(workspace, archive_dir, maximize=maximize)
+    hard_limit = rule_count + quota_tolerance
+
+    def _run():
+        result_holder.append(
+            runner.run(
+                workspace_dir,
+                prompt,
+                timeout_seconds,
+                pid_holder=pid_holder,
+                continue_session=continue_session,
+                session_id=session_id,
+                append_logs=append_logs,
+            )
+        )
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    while thread.is_alive():
+        time.sleep(poll_interval_seconds)
+        watcher.sync()
+        if not pid_holder:
+            continue
+        archive = Archive(archive_dir, maximize)
+        submitted = injection_submission_count(archive, injection_start_count)
+        if is_injection_quota_reached(
+            archive,
+            injection_start_count,
+            rule_count,
+            quota_tolerance=quota_tolerance,
+        ):
+            best = archive.best()
+            record_event(
+                workspace,
+                "injection_quota",
+                submitted=submitted,
+                rule_count=rule_count,
+                quota_tolerance=quota_tolerance,
+                hard_limit=hard_limit,
+                injection_start_count=injection_start_count,
+                best_so_far=best.score if best else None,
+                best_attempt_id=best.attempt_id if best else None,
+                attempt_count=archive.submission_count(),
+            )
+            stop_event.set()
+            _terminate_pid(pid_holder[0])
+            break
+
+    thread.join(timeout=timeout_seconds + 120)
+    if not result_holder:
+        return RunResult(
+            success=False,
+            returncode=-1,
+            stdout="",
+            stderr="",
+            error="OpenCode run did not return",
+            stopped_reason="injection_quota" if stop_event.is_set() else None,
+        )
+
+    result = result_holder[0]
+    if stop_event.is_set():
+        result.stopped_reason = "injection_quota"
+        result.success = False
+        if not result.error:
+            result.error = (
+                f"Stopped: injection quota reached ({hard_limit} submissions "
+                f"= {rule_count} rules + {quota_tolerance} tolerance)"
+            )
     return result

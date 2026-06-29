@@ -1,0 +1,20 @@
+project_name: pid_tuning_trial3
+maximize: true
+
+problem: problem.md
+initial_program: initial_program.py
+evaluator: evaluator.py
+analyzer: analyzer_rich.py
+
+agent_readable_evaluator: false
+max_improvements: 100
+agent_timeout_seconds: 10800
+evaluation_timeout_seconds: 300
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - json
+    - --dangerously-skip-permissions

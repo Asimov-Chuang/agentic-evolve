@@ -1,0 +1,5 @@
+task_id: high_reliable_simulation
+trajectory_format: high_reliable_simulation_raw_artifact
+rule_description_source: metrics.rule_descriptions
+prompt_template: templates/rule_guided_prompt.md.j2
+factor_label_style: numbered

@@ -3,10 +3,10 @@ adapter: adapters/sustaindc.yaml
 
 primary:
   config: ../examples/sustaindc/config_rich_feedback.yaml
-  project_name: sustaindc_X
+  project_name: sustaindc_Test
 
 stuck:
-  consecutive_no_improvement: 5
+  consecutive_no_improvement: 10
   poll_interval_seconds: 5
 
 discovery:

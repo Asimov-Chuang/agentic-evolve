@@ -4,12 +4,21 @@
 
 ## Critical diagnostic factors for algorithm improvement
 
-Through analysis of high-performing programs, we identified the following {{ rules|length }} behavioral patterns that are **crucial** for improving performance. A program that better satisfies these patterns tends to score significantly higher. Use them as design guidance when proposing new algorithms.
+Through analysis of high-performing programs, we identified the following {{ rules|length }} behavioral patterns that are **crucial** for improving performance. Use them as design guidance when proposing new algorithms.
 
+{% if include_rule_weights %}
+**Score association:** Each factor below is labeled with whether exhibiting that pattern is **positively** or **negatively** associated with higher scores (from historical regression on past attempts). Magnitudes are omitted — only the direction matters. Factors marked **positive** are behaviors to encourage; **negative** are behaviors to reduce or avoid.
+{% else %}
 **Important:** Treat each pattern below as an independent design principle. Do NOT assume any relative importance or weight among them — focus only on the behavioral content described.
+{% endif %}
 
 {% for rule in rules %}
 ### Factor {{ loop.index }}: {{ rule.name }}
+{% if include_rule_weights and rule.score_effect == "positive" %}
+**Score association (positive):** Programs that better exhibit this pattern tend to achieve **higher** scores.
+{% elif include_rule_weights and rule.score_effect == "negative" %}
+**Score association (negative):** Programs that better exhibit this pattern tend to achieve **lower** scores — consider reducing or counteracting this behavior.
+{% endif %}
 {{ rule.description }}
 
 {% endfor %}

@@ -1,0 +1,18 @@
+agent_readable_evaluator: false
+agent_timeout_seconds: 108000
+analyzer: analyzer_rich.py
+evaluation_timeout_seconds: 120
+evaluator: evaluator.py
+initial_program: initial_program.py
+max_improvements: 300
+maximize: true
+opencode:
+  args:
+  - run
+  - json
+  - --dangerously-skip-permissions
+  command: opencode
+problem: problem.md
+project_name: optics_temporal_smooth_AD
+store_raw_artifacts: false
+verbose: false

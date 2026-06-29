@@ -24,13 +24,25 @@ class OpenCodeRunner:
         self.args = args
         self.verbose = verbose
 
-    def _build_command(self, workspace_dir: str, prompt: str) -> list[str]:
+    def _build_command(
+        self,
+        workspace_dir: str,
+        prompt: str,
+        *,
+        continue_session: bool = False,
+        session_id: str | None = None,
+    ) -> list[str]:
         workspace = str(Path(workspace_dir).resolve())
         args = list(self.args)
 
         # opencode run ignores subprocess cwd; must pass --dir explicitly.
         if "--dir" not in args:
             args.extend(["--dir", workspace])
+
+        if session_id and "--session" not in args and "-s" not in args:
+            args.extend(["--session", session_id])
+        elif continue_session and "--continue" not in args and "-c" not in args:
+            args.extend(["--continue"])
 
         return [self.command, *args, prompt]
 
@@ -41,6 +53,9 @@ class OpenCodeRunner:
         timeout_seconds: int,
         *,
         pid_holder: list[int] | None = None,
+        continue_session: bool = False,
+        session_id: str | None = None,
+        append_logs: bool = False,
     ) -> RunResult:
         workspace = Path(workspace_dir).resolve()
         workspace.mkdir(parents=True, exist_ok=True)
@@ -51,16 +66,33 @@ class OpenCodeRunner:
 
         prompt_path.write_text(prompt, encoding="utf-8")
 
-        cmd = self._build_command(str(workspace), prompt)
+        cmd = self._build_command(
+            str(workspace),
+            prompt,
+            continue_session=continue_session,
+            session_id=session_id,
+        )
         workspace_str = str(workspace)
 
         try:
             if self.verbose:
                 return self._run_streaming(
-                    cmd, workspace_str, stdout_path, stderr_path, timeout_seconds, pid_holder
+                    cmd,
+                    workspace_str,
+                    stdout_path,
+                    stderr_path,
+                    timeout_seconds,
+                    pid_holder,
+                    append_logs=append_logs,
                 )
             return self._run_captured(
-                cmd, workspace_str, stdout_path, stderr_path, timeout_seconds, pid_holder
+                cmd,
+                workspace_str,
+                stdout_path,
+                stderr_path,
+                timeout_seconds,
+                pid_holder,
+                append_logs=append_logs,
             )
         except FileNotFoundError:
             msg = f"Command not found: {self.command}"
@@ -82,6 +114,7 @@ class OpenCodeRunner:
         stderr_path: Path,
         timeout_seconds: int,
         pid_holder: list[int] | None = None,
+        append_logs: bool = False,
     ) -> RunResult:
         try:
             process = subprocess.Popen(
@@ -105,8 +138,14 @@ class OpenCodeRunner:
                 result = self._timeout_result(exc, stdout_path, stderr_path, timeout_seconds)
                 result.pid = pid
                 return result
-            stdout_path.write_text(stdout or "", encoding="utf-8")
-            stderr_path.write_text(stderr or "", encoding="utf-8")
+            if append_logs:
+                with open(stdout_path, "a", encoding="utf-8") as f:
+                    f.write(stdout or "")
+                with open(stderr_path, "a", encoding="utf-8") as f:
+                    f.write(stderr or "")
+            else:
+                stdout_path.write_text(stdout or "", encoding="utf-8")
+                stderr_path.write_text(stderr or "", encoding="utf-8")
             return RunResult(
                 success=process.returncode == 0,
                 returncode=process.returncode or 0,
@@ -125,12 +164,19 @@ class OpenCodeRunner:
         stderr_path: Path,
         timeout_seconds: int,
         pid_holder: list[int] | None = None,
+        append_logs: bool = False,
     ) -> RunResult:
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
 
-        with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
-            stderr_path, "w", encoding="utf-8"
+        stdout_mode = "a" if append_logs else "w"
+        stderr_mode = "a" if append_logs else "w"
+        if append_logs:
+            stdout_chunks.append(stdout_path.read_text(encoding="utf-8") if stdout_path.is_file() else "")
+            stderr_chunks.append(stderr_path.read_text(encoding="utf-8") if stderr_path.is_file() else "")
+
+        with open(stdout_path, stdout_mode, encoding="utf-8") as stdout_file, open(
+            stderr_path, stderr_mode, encoding="utf-8"
         ) as stderr_file:
             process = subprocess.Popen(
                 cmd,

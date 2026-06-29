@@ -1,0 +1,39 @@
+project_name: mechanism_discovery_optics_temporal
+maximize: true
+
+source_archive: ../../adaptive_temporal_smooth_control/outputs/optics_temporal_smooth_rich_feedback/archive
+source_archive_top_n: 50
+discovery_sample_type: trajectory
+
+problem: problem.md
+initial_program: initial_program.py
+evaluator: evaluator.py
+
+mechanism:
+  max_code_predicates: 6
+  max_trace_predicates: 8
+  max_links: 12
+  min_support: 3
+  enable_predictive_r2: false
+  link_consistency_weight: 0.625
+  path_coherence_weight: 0.375
+  metric_nodes:
+    - mean_slew
+    - mean_rms
+    - mean_strehl
+    - score
+    - u_mean_slew
+    - u_mean_rms
+    - u_strehl
+
+agent_readable_evaluator: true
+max_improvements: 50
+agent_timeout_seconds: 3600
+evaluation_timeout_seconds: 600
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - --dangerously-skip-permissions

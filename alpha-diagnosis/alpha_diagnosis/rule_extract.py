@@ -12,6 +12,16 @@ class RuleSpec:
     index: int
     name: str
     description: str
+    # "positive" | "negative" when regression coef sign is known; None otherwise.
+    score_effect: str | None = None
+
+
+def _score_effect_from_coef(coef: float) -> str | None:
+    if coef > 0:
+        return "positive"
+    if coef < 0:
+        return "negative"
+    return None
 
 
 def extract_rules_from_result(result_path: Path) -> List[RuleSpec]:
@@ -24,7 +34,18 @@ def extract_rules_from_result(result_path: Path) -> List[RuleSpec]:
         rules: List[RuleSpec] = []
         for i, desc in enumerate(descriptions):
             name = names[i] if isinstance(names, list) and i < len(names) else f"rule_{i}"
-            rules.append(RuleSpec(index=i, name=str(name), description=str(desc)))
+            coef_raw = metrics.get(f"coef_{i}")
+            score_effect = (
+                _score_effect_from_coef(float(coef_raw)) if coef_raw is not None else None
+            )
+            rules.append(
+                RuleSpec(
+                    index=i,
+                    name=str(name),
+                    description=str(desc),
+                    score_effect=score_effect,
+                )
+            )
         return rules
 
     rule_set_size = int(metrics.get("rule_set_size", 0))
@@ -32,7 +53,18 @@ def extract_rules_from_result(result_path: Path) -> List[RuleSpec]:
     for i in range(rule_set_size):
         name = metrics.get(f"rule_name_{i}", f"rule_{i}")
         desc = metrics.get(f"rule_description_{i}", str(name))
-        rules.append(RuleSpec(index=i, name=str(name), description=str(desc)))
+        coef_raw = metrics.get(f"coef_{i}")
+        score_effect = (
+            _score_effect_from_coef(float(coef_raw)) if coef_raw is not None else None
+        )
+        rules.append(
+            RuleSpec(
+                index=i,
+                name=str(name),
+                description=str(desc),
+                score_effect=score_effect,
+            )
+        )
     if rules:
         return rules
     raise ValueError(f"No rule descriptions in {result_path}")

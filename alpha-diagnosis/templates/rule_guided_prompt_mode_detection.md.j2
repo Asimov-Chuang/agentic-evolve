@@ -1,0 +1,41 @@
+{# Mode-detection rule injection for AO / structural trajectory patterns #}
+
+---
+
+## Critical diagnostic modes for algorithm improvement
+
+Trajectory analysis identified the following {{ rules|length }} **behavioral modes** (failure modes or success signatures). Use them when designing new controller variants.
+
+{% if include_rule_weights %}
+**Score association:** Each mode is labeled **positive** (presence tends to correlate with higher scores) or **negative** (presence tends to correlate with lower scores) from historical regression. Magnitudes are omitted — direction only.
+{% else %}
+**Important:** Treat each mode as an independent design principle. Focus on the behavioral content, not relative weights.
+{% endif %}
+
+{% for rule in rules %}
+### Mode {{ loop.index }}: {{ rule.name }}
+{% if include_rule_weights and rule.score_effect == "positive" %}
+**Association (positive):** Attempts where this mode is **present** tend to score higher — consider reinforcing this signature.
+{% elif include_rule_weights and rule.score_effect == "negative" %}
+**Association (negative):** Attempts where this mode is **present** tend to score lower — design to **avoid** triggering this failure mode.
+{% endif %}
+{{ rule.description }}
+
+{% endfor %}
+---
+
+## Your task
+
+From the current best program ({{ best_attempt_id }} / best_program.py), **submit exactly {{ rules|length }} new variants** — one per mode above:
+
+{% for rule in rules %}
+{{ loop.index }}. **Variant {{ loop.index }}** — targets Mode {{ loop.index }} ({{ rule.name }}): avoid the failure mode or strengthen the success signature as described.
+{% endfor %}
+
+For each variant:
+- Start from best_program.py and make targeted structural changes (regime handling, transition response, episode consistency, alignment logic, etc.).
+- Each variant should address its mode in a **distinct** way.
+- Write to candidate.py, run `python submit.py candidate.py`, record the score.
+- After all {{ rules|length }} submissions, summarize which modes improved scores.
+
+Begin with Variant 1 now.

@@ -1,0 +1,22 @@
+project_name: ablation_run_3
+maximize: true
+output_group: cond_a
+
+problem: ../problem.md
+initial_program: ../initial_program.py
+evaluator: ../evaluator_stub.py
+analyzer: ../analyzer_score_only.py
+
+agent_readable_evaluator: false
+hidden_testdata: true
+opencode_config: ../opencode.blind_ablation.json
+max_improvements: 300
+agent_timeout_seconds: 10800
+evaluation_timeout_seconds: 120
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - json

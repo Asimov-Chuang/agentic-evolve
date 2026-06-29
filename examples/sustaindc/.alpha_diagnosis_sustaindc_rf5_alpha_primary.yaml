@@ -13,5 +13,5 @@ opencode:
   - --dangerously-skip-permissions
   command: opencode
 problem: problem.md
-project_name: sustaindc_rule
+project_name: sustaindc_Test
 verbose: false

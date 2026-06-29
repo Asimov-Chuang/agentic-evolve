@@ -1,0 +1,21 @@
+project_name: optics_temporal_smooth_pro3
+mode: pro
+maximize: true
+store_raw_artifacts: true
+problem: problem.md
+initial_program: initial_program.py
+evaluator: evaluator.py
+analyzer: analyzer_pro.py
+
+agent_readable_evaluator: false
+max_improvements: 300
+agent_timeout_seconds: 108000
+evaluation_timeout_seconds: 120
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - json
+    - --dangerously-skip-permissions

@@ -83,7 +83,6 @@ MAX_AUTO_CONTINUES=-1 bash examples/Control_Sequence/scripts/run_0pct_metric_mea
 ```
 
 Replicate scripts enable `agentic-evolve run --auto-continue` by default, so an agent that exits before exhausting `max_improvements` is continued in the same OpenCode session until the budget is used or `MAX_AUTO_CONTINUES` is reached.
-
 ### CloudGPT proxy + model selection
 
 Replicate scripts can route OpenCode through the company CloudGPT proxy. Enable with `USE_CLOUDGPT=1` and pick a model via `CLOUDGPT_MODEL` (must match `provider/model` in [`opencode.cloudgpt.json`](../../opencode.cloudgpt.json)):

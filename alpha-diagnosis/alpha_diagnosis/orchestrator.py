@@ -9,16 +9,28 @@ from typing import Any, Callable, List
 import yaml
 
 from agentic_evolve.archive import Archive, save_best_program
-from agentic_evolve.cli import _save_run_checkpoint
+from agentic_evolve.checkpoint import save_run_checkpoint
 from agentic_evolve.config import load_config
 from agentic_evolve.opencode_runner import OpenCodeRunner
+from agentic_evolve.opencode_session import load_session_id, update_session_id_from_output
 from agentic_evolve.score_trajectory import record_event, sync_archive_to_trajectory
 from agentic_evolve.workspace import setup_workspace
 
-from alpha_diagnosis.config_schema import WorkflowConfig, load_workflow
+from alpha_diagnosis.config_schema import ForkConfig, WorkflowConfig, load_workflow
 from alpha_diagnosis.discovery import run_discovery_cycle, save_discovery_artifact
-from alpha_diagnosis.prompt_builder import build_rule_guided_prompt, validate_injection_config
-from alpha_diagnosis.stuck_monitor import run_with_stuck_monitor
+from alpha_diagnosis.fork import fork_workspace
+from alpha_diagnosis.history_review import run_history_review_cycle, save_history_review_artifact
+from alpha_diagnosis.prompt_builder import (
+    build_primary_continuation_prompt,
+    build_rule_guided_prompt,
+    injection_quota_target,
+    validate_injection_config,
+)
+from alpha_diagnosis.stuck_monitor import (
+    injection_submission_count,
+    run_with_injection_quota_monitor,
+    run_with_stuck_monitor,
+)
 
 STATE_FILENAME = "state.json"
 
@@ -63,13 +75,23 @@ def _state_path(workspace: Path) -> Path:
 
 
 def _resolve_primary_config(workflow: WorkflowConfig) -> Path:
-    if not workflow.primary.project_name:
+    needs_derived = (
+        workflow.primary.project_name is not None
+        or workflow.store_raw_artifacts is not None
+        or workflow.primary.store_raw_artifacts is not None
+    )
+    if not needs_derived:
         return workflow.primary.config_path
     original = workflow.primary.config_path.resolve()
     config_dir = original.parent
     with open(original, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
-    raw["project_name"] = workflow.primary.project_name
+    if workflow.primary.project_name:
+        raw["project_name"] = workflow.primary.project_name
+    if workflow.store_raw_artifacts is not None:
+        raw["store_raw_artifacts"] = workflow.store_raw_artifacts
+    if workflow.primary.store_raw_artifacts is not None:
+        raw["store_raw_artifacts"] = workflow.primary.store_raw_artifacts
     # Keep derived config beside the source config so load_config resolves
     # problem/evaluator paths and outputs/{project_name} from the task dir.
     out_path = config_dir / f".alpha_diagnosis_{workflow.name}_primary.yaml"
@@ -82,13 +104,31 @@ def _tag_injection_attempts(
     start_count: int,
     cycle: int,
     rule_count: int,
+    *,
+    mode: str = "per_rule_variants",
+    tag_limit: int | None = None,
 ) -> tuple[int, int]:
     attempts = sorted(archive_dir.glob("attempt_*"))
     new_attempts = attempts[start_count:]
+    if mode == "pro":
+        to_tag = new_attempts if tag_limit is None else new_attempts[:tag_limit]
+    else:
+        limit = tag_limit if tag_limit is not None else rule_count
+        to_tag = new_attempts[:limit]
     first_idx = -1
     last_idx = -1
-    for i, attempt_dir in enumerate(new_attempts[:rule_count]):
-        meta = {"source": "alpha_diagnosis", "cycle": cycle, "rule_index": i}
+    for i, attempt_dir in enumerate(to_tag):
+        if mode == "pro":
+            meta = {"source": "alpha_diagnosis", "cycle": cycle, "mode": "pro", "proposal_index": i}
+        elif mode == "counterfactual":
+            meta = {
+                "source": "alpha_diagnosis",
+                "cycle": cycle,
+                "mode": "counterfactual",
+                "rule_index": i,
+            }
+        else:
+            meta = {"source": "alpha_diagnosis", "cycle": cycle, "rule_index": i}
         (attempt_dir / "diagnosis_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         num = int(attempt_dir.name.split("_")[1])
         if first_idx < 0:
@@ -117,6 +157,11 @@ def _run_evolution_monitored(
     verbose: bool = False,
     session_baseline_count: int | None = None,
     enable_stuck_monitor: bool = True,
+    injection_start_count: int | None = None,
+    injection_rule_count: int | None = None,
+    injection_quota_tolerance: int = 2,
+    continue_opencode_session: bool = False,
+    append_opencode_logs: bool = False,
 ) -> dict[str, Any]:
     config = load_config(config_path)
     workspace, archive, resumed_flag = setup_workspace(config, fresh=fresh)
@@ -139,6 +184,9 @@ def _run_evolution_monitored(
             resumed=resumed_flag or resume,
             hidden_testdata=config.hidden_testdata,
             agent_readable_evaluator=config.agent_readable_evaluator,
+            prompt_history_top_n=config.prompt_history_top_n,
+            prompt_history_recent_n=config.prompt_history_recent_n,
+            prompt_history_max_feedback_chars=config.prompt_history_max_feedback_chars,
         )
     else:
         prompt = custom_prompt
@@ -159,12 +207,22 @@ def _run_evolution_monitored(
         **_trajectory_session_fields(archive, config),
     )
 
-    _save_run_checkpoint(str(config_path), config, archive, status="running")
+    save_run_checkpoint(str(config_path), config, archive, status="running")
     runner = OpenCodeRunner(
         command=config.opencode.command,
         args=config.opencode.resolved_args(),
         verbose=config.verbose or verbose,
     )
+    session_id = load_session_id(workspace) if continue_opencode_session else None
+    use_continue = continue_opencode_session and session_id is None
+    append_logs = append_opencode_logs or (
+        continue_opencode_session and session_id is not None
+    )
+    run_kwargs = {
+        "continue_session": use_continue,
+        "session_id": session_id,
+        "append_logs": append_logs,
+    }
     if enable_stuck_monitor:
         result = run_with_stuck_monitor(
             runner,
@@ -175,9 +233,31 @@ def _run_evolution_monitored(
             config.maximize,
             workflow.stuck,
             session_baseline_count=session_baseline_count,
+            **run_kwargs,
+        )
+    elif injection_start_count is not None and injection_rule_count is not None:
+        result = run_with_injection_quota_monitor(
+            runner,
+            str(workspace),
+            prompt,
+            config.agent_timeout_seconds,
+            config.archive_dir,
+            config.maximize,
+            poll_interval_seconds=workflow.stuck.poll_interval_seconds,
+            injection_start_count=injection_start_count,
+            rule_count=injection_rule_count,
+            quota_tolerance=injection_quota_tolerance,
+            **run_kwargs,
         )
     else:
-        result = runner.run(str(workspace), prompt, config.agent_timeout_seconds)
+        result = runner.run(
+            str(workspace),
+            prompt,
+            config.agent_timeout_seconds,
+            **run_kwargs,
+        )
+
+    update_session_id_from_output(workspace, result.stdout, result.stderr)
 
     archive = Archive(config.archive_dir, config.maximize)
     remaining = archive.remaining_improvements(config.max_improvements)
@@ -194,7 +274,7 @@ def _run_evolution_monitored(
         stopped_reason=result.stopped_reason,
         **_trajectory_session_fields(archive, config),
     )
-    _save_run_checkpoint(str(config_path), config, archive, status=status)
+    save_run_checkpoint(str(config_path), config, archive, status=status)
     save_best_program(archive, config.best_program_path, config.initial_program)
     return {
         "status": status,
@@ -206,6 +286,9 @@ def _run_evolution_monitored(
     }
 
 
+from agentic_evolve.session import should_auto_resume_session as _should_auto_resume_session
+
+
 def _should_auto_resume(
     evo: dict[str, Any],
     *,
@@ -213,29 +296,13 @@ def _should_auto_resume(
     injection_start_count: int | None = None,
     injection_target: int | None = None,
 ) -> bool:
-    if not auto_resume:
-        return False
-    if evo["stopped_reason"] == "stuck":
-        return False
-    if evo["status"] == "completed":
-        return False
-
-    config = evo["config"]
-    archive: Archive = evo["archive"]
-    remaining = archive.remaining_improvements(config.max_improvements)
-    if remaining <= 0:
-        return False
-
     if injection_start_count is not None and injection_target is not None:
-        submitted = archive.submission_count() - injection_start_count
+        config = evo["config"]
+        archive: Archive = evo["archive"]
+        submitted = injection_submission_count(archive, injection_start_count)
         if submitted >= injection_target:
             return False
-
-    result = evo.get("result")
-    if result is not None and not result.success:
-        return False
-
-    return True
+    return _should_auto_resume_session(evo, auto_resume=auto_resume)
 
 
 def _run_evolution_until_stuck_or_done(
@@ -249,16 +316,51 @@ def _run_evolution_until_stuck_or_done(
     verbose: bool = False,
     injection_start_count: int | None = None,
     injection_target: int | None = None,
+    initial_continue_opencode: bool = False,
+    use_continuation_on_auto_resume: bool = False,
 ) -> dict[str, Any]:
     """Run one or more OpenCode sessions until stuck, budget exhausted, or hard failure."""
+    shared = workflow.loop.shared_opencode_session
     session_resume = resume
     use_fresh = fresh
     evo: dict[str, Any] | None = None
     stuck_baseline: int | None = None
     is_injection = injection_start_count is not None
+    injection_tol = workflow.injection.quota_tolerance if is_injection else 2
+    first_opencode = True
 
     while True:
-        prompt = prompt_factory() if prompt_factory is not None else custom_prompt
+        if evo is not None and use_continuation_on_auto_resume and shared:
+            config = load_config(config_path)
+            archive = Archive(config.archive_dir, config.maximize)
+            if is_injection and prompt_factory is not None:
+                prompt = prompt_factory()
+            elif not is_injection:
+                from agentic_evolve.prompt_builder import build_continuation_prompt
+
+                prompt = build_continuation_prompt(
+                    archive,
+                    config.workspace_dir,
+                    config.max_improvements,
+                    mode=config.mode,
+                )
+            else:
+                prompt = custom_prompt
+        else:
+            prompt = prompt_factory() if prompt_factory is not None else custom_prompt
+
+        continue_oc = False
+        append_logs = False
+        if shared:
+            config = load_config(config_path)
+            sid = load_session_id(config.workspace_dir)
+            if first_opencode:
+                continue_oc = initial_continue_opencode or (session_resume and sid is not None)
+                append_logs = continue_oc and sid is not None
+            else:
+                continue_oc = True
+                append_logs = True
+
         evo = _run_evolution_monitored(
             workflow,
             config_path,
@@ -268,7 +370,13 @@ def _run_evolution_until_stuck_or_done(
             verbose=verbose,
             session_baseline_count=stuck_baseline,
             enable_stuck_monitor=not is_injection,
+            injection_start_count=injection_start_count,
+            injection_rule_count=injection_target,
+            injection_quota_tolerance=injection_tol,
+            continue_opencode_session=continue_oc,
+            append_opencode_logs=append_logs,
         )
+        first_opencode = False
         if stuck_baseline is None:
             stuck_baseline = int(evo["session_baseline_count"])
         session_resume = True
@@ -284,50 +392,154 @@ def _run_evolution_until_stuck_or_done(
 
         remaining = evo["archive"].remaining_improvements(evo["config"].max_improvements)
         if verbose:
+            mode_label = "continuing same OpenCode session" if shared else "auto-resuming"
             print(
                 f"agent exited early with {remaining} improvement(s) remaining; "
-                f"auto-resuming (stuck baseline={stuck_baseline})...",
+                f"{mode_label} (stuck baseline={stuck_baseline})...",
                 flush=True,
             )
         record_event(
             evo["config"].workspace_dir,
             "auto_resume",
             mode="rule_injection" if prompt_factory or custom_prompt else "evolution",
+            resume_mode="continue" if shared else "new_session",
             session_baseline_count=stuck_baseline,
             **_trajectory_session_fields(evo["archive"], evo["config"]),
         )
 
 
-def run_workflow(workflow_path: Path, *, resume: bool = False, verbose: bool = False) -> int:
+def _resolve_fork(
+    workflow: WorkflowConfig,
+    *,
+    fork_from: Path | None,
+    fork_at_stuck: int | None,
+    fork_at_attempt: int | None,
+) -> ForkConfig | None:
+    if fork_from is not None:
+        if fork_at_stuck is not None and fork_at_attempt is not None:
+            raise ValueError("Specify only one of fork_at_stuck or fork_at_attempt")
+        if fork_at_stuck is None and fork_at_attempt is None:
+            raise ValueError("--fork-from requires --fork-at-stuck or --fork-at-attempt")
+        start_at_diagnosis = fork_at_stuck is not None
+        return ForkConfig(
+            source_workspace=fork_from.resolve(),
+            at_stuck_cycle=fork_at_stuck,
+            at_attempt=fork_at_attempt,
+            start_at_diagnosis=start_at_diagnosis,
+        )
+    return workflow.fork
+
+
+def run_workflow(
+    workflow_path: Path,
+    *,
+    resume: bool = False,
+    verbose: bool = False,
+    fork_from: Path | None = None,
+    fork_at_stuck: int | None = None,
+    fork_at_attempt: int | None = None,
+) -> int:
     workflow = load_workflow(workflow_path)
     if workflow.adapter.trajectory_format == "none":
         raise ValueError(f"Adapter {workflow.adapter.task_id} does not support trajectory-based diagnosis")
 
     primary_cfg_path = _resolve_primary_config(workflow)
     primary_cfg = load_config(primary_cfg_path)
+
+    fork_cfg = _resolve_fork(
+        workflow,
+        fork_from=fork_from,
+        fork_at_stuck=fork_at_stuck,
+        fork_at_attempt=fork_at_attempt,
+    )
+    skip_evolution_once = False
+    if fork_cfg is not None:
+        if verbose:
+            print(f"Forking workspace from {fork_cfg.source_workspace}...", flush=True)
+        fork_workspace(fork_cfg, primary_cfg, config_path=str(primary_cfg_path.resolve()))
+        resume = True
+        skip_evolution_once = fork_cfg.start_at_diagnosis
+        if skip_evolution_once and verbose:
+            print(
+                "Fork point is a stuck checkpoint; skipping evolution and starting diagnosis.",
+                flush=True,
+            )
+
     state = AlphaState.load(_state_path(primary_cfg.workspace_dir))
     state.workflow_name = workflow.name
 
     cycle = state.cycle
     should_resume = resume or cycle > 0 or state.cycle > 0
+    primary_after_injection = False
 
     while cycle < workflow.loop.max_diagnosis_cycles:
-        evo = _run_evolution_until_stuck_or_done(
-            workflow,
-            primary_cfg_path,
-            resume=should_resume,
-            fresh=False,
-            verbose=verbose,
-        )
-        archive: Archive = evo["archive"]
-        if evo["stopped_reason"] != "stuck":
-            state.save(_state_path(primary_cfg.workspace_dir))
-            return 0
+        if skip_evolution_once:
+            skip_evolution_once = False
+            primary_cfg = load_config(primary_cfg_path)
+            archive = Archive(primary_cfg.archive_dir, primary_cfg.maximize)
+            sync_archive_to_trajectory(
+                primary_cfg.workspace_dir,
+                primary_cfg.archive_dir,
+                maximize=primary_cfg.maximize,
+                event="backfill",
+            )
+            record_event(
+                primary_cfg.workspace_dir,
+                "stuck",
+                consecutive_no_improvement=workflow.stuck.consecutive_no_improvement,
+                threshold=workflow.stuck.consecutive_no_improvement,
+                fork_immediate_diagnosis=True,
+                **_trajectory_session_fields(archive, primary_cfg),
+            )
+            evo = {"stopped_reason": "stuck", "archive": archive}
+        elif primary_after_injection and workflow.loop.shared_opencode_session:
+            def _primary_after_injection_prompt() -> str:
+                cfg = load_config(primary_cfg_path)
+                current = Archive(cfg.archive_dir, cfg.maximize)
+                return build_primary_continuation_prompt(
+                    current,
+                    cfg.workspace_dir,
+                    cfg.max_improvements,
+                    mode=cfg.mode,
+                )
 
+            evo = _run_evolution_until_stuck_or_done(
+                workflow,
+                primary_cfg_path,
+                resume=True,
+                fresh=False,
+                prompt_factory=_primary_after_injection_prompt,
+                verbose=verbose,
+                initial_continue_opencode=True,
+                use_continuation_on_auto_resume=True,
+            )
+            primary_after_injection = False
+            archive = evo["archive"]
+            if evo["stopped_reason"] != "stuck":
+                state.save(_state_path(primary_cfg.workspace_dir))
+                return 0
+        else:
+            evo = _run_evolution_until_stuck_or_done(
+                workflow,
+                primary_cfg_path,
+                resume=should_resume,
+                fresh=False,
+                verbose=verbose,
+                use_continuation_on_auto_resume=workflow.loop.shared_opencode_session,
+            )
+            archive = evo["archive"]
+            if evo["stopped_reason"] != "stuck":
+                state.save(_state_path(primary_cfg.workspace_dir))
+                return 0
+
+        discovery_mode = (
+            workflow.discovery.mode if workflow.discovery is not None else None
+        )
         record_event(
             primary_cfg.workspace_dir,
             "discovery_start",
             cycle=cycle + 1,
+            discovery_mode=discovery_mode,
             **_trajectory_session_fields(archive, primary_cfg),
         )
 
@@ -335,19 +547,31 @@ def run_workflow(workflow_path: Path, *, resume: bool = False, verbose: bool = F
             break
 
         cycle += 1
-        discovery = run_discovery_cycle(
-            workflow,
-            primary_cfg_path,
-            primary_cfg.archive_dir,
-            primary_cfg.workspace_dir,
-            cycle,
-            verbose=verbose,
-        )
-        save_discovery_artifact(primary_cfg.workspace_dir, discovery)
+        if workflow.discovery.mode == "agent_review":
+            discovery = run_history_review_cycle(
+                workflow,
+                primary_cfg_path,
+                primary_cfg.archive_dir,
+                primary_cfg.workspace_dir,
+                cycle,
+                verbose=verbose,
+            )
+            save_history_review_artifact(primary_cfg.workspace_dir, discovery)
+        else:
+            discovery = run_discovery_cycle(
+                workflow,
+                primary_cfg_path,
+                primary_cfg.archive_dir,
+                primary_cfg.workspace_dir,
+                cycle,
+                verbose=verbose,
+            )
+            save_discovery_artifact(primary_cfg.workspace_dir, discovery)
         record_event(
             primary_cfg.workspace_dir,
             "discovery_end",
             cycle=cycle,
+            discovery_mode=workflow.discovery.mode,
             discovery_project=discovery.project_name,
             discovery_best_score=discovery.best_score,
             discovery_best_attempt_id=discovery.best_attempt_id,
@@ -356,6 +580,7 @@ def run_workflow(workflow_path: Path, *, resume: bool = False, verbose: bool = F
         state.discovery_history.append(
             {
                 "cycle": cycle,
+                "mode": workflow.discovery.mode,
                 "project_name": discovery.project_name,
                 "best_score": discovery.best_score,
                 "best_attempt_id": discovery.best_attempt_id,
@@ -369,6 +594,9 @@ def run_workflow(workflow_path: Path, *, resume: bool = False, verbose: bool = F
         validate_injection_config(workflow.injection, len(discovery.rules))
         start_count = archive.submission_count()
         rule_count = len(discovery.rules)
+        quota_target = injection_quota_target(workflow.injection, rule_count)
+
+        shared_session = workflow.loop.shared_opencode_session
 
         def _injection_prompt() -> str:
             current = Archive(primary_cfg.archive_dir, primary_cfg.maximize)
@@ -381,6 +609,11 @@ def run_workflow(workflow_path: Path, *, resume: bool = False, verbose: bool = F
                 resumed=True,
                 agent_readable_evaluator=primary_cfg.agent_readable_evaluator,
                 hidden_testdata=primary_cfg.hidden_testdata,
+                prompt_history_top_n=primary_cfg.prompt_history_top_n,
+                prompt_history_recent_n=primary_cfg.prompt_history_recent_n,
+                prompt_history_max_feedback_chars=primary_cfg.prompt_history_max_feedback_chars,
+                cycle=cycle,
+                continuation=shared_session,
             )
 
         _run_evolution_until_stuck_or_done(
@@ -391,14 +624,18 @@ def run_workflow(workflow_path: Path, *, resume: bool = False, verbose: bool = F
             prompt_factory=_injection_prompt,
             verbose=verbose,
             injection_start_count=start_count,
-            injection_target=rule_count,
+            injection_target=quota_target,
+            initial_continue_opencode=shared_session,
+            use_continuation_on_auto_resume=shared_session,
         )
         archive = Archive(primary_cfg.archive_dir, primary_cfg.maximize)
         first_idx, last_idx = _tag_injection_attempts(
             primary_cfg.archive_dir,
             start_count,
             cycle,
-            len(discovery.rules),
+            rule_count,
+            mode=workflow.injection.mode,
+            tag_limit=quota_target if workflow.injection.mode == "pro" else None,
         )
         if first_idx >= 0:
             state.rule_inspired_ranges.append(
@@ -410,6 +647,8 @@ def run_workflow(workflow_path: Path, *, resume: bool = False, verbose: bool = F
 
         if not workflow.loop.resume_after_injection:
             break
+
+        primary_after_injection = workflow.loop.shared_opencode_session
 
     state.save(_state_path(primary_cfg.workspace_dir))
     return 0

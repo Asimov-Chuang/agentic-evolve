@@ -42,6 +42,30 @@ Toggle feedback by enabling or commenting `analyzer: analyzer.py` in config. The
 
 Both configs use different `project_name` values (`sustaindc_score_only` vs `sustaindc_rich_feedback`) so you can run them in parallel without workspace conflicts.
 
+### PRO mode (co-evolve analyzer + algorithm)
+
+Set `mode: pro` in config to require the agent to evolve **both** `analyzer.py` and `candidate.py` after every submit. PRO mode:
+
+- Requires `analyzer:` in config (and forces `store_raw_artifacts: true` so each attempt has `raw-artifact.json`).
+- Copies `rerun_analyzer.py` into the workspace so the agent can re-run the analyzer on an existing attempt without consuming the improvement budget.
+- Prompts a fixed loop: submit → read result + raw artifact → improve analyzer → `python rerun_analyzer.py [attempt_id]` → improve candidate → repeat.
+
+Optics example:
+
+```bash
+agentic-evolve run examples/adaptive_temporal_smooth_control/config_pro.yaml
+agentic-evolve run --resume examples/adaptive_temporal_smooth_control/config_pro.yaml
+```
+
+SustainDC example:
+
+```bash
+agentic-evolve run examples/sustaindc/config_pro.yaml
+agentic-evolve run --resume examples/sustaindc/config_pro.yaml
+```
+
+On resume, the workspace keeps the agent-edited `analyzer.py` (only re-seeded on `--fresh`).
+
 ## Workspace layout
 
 One workspace per run at `outputs/{project_name}/`:
@@ -51,12 +75,14 @@ outputs/circle_packing/
   problem.md
   evaluator.py
   analyzer.py            # optional processed-feedback helper
+  rerun_analyzer.py      # PRO mode: re-run analyzer on existing attempt
   submit.py              # evaluate + archive helper
   workspace_meta.json
   archive/
     attempt_0000/
       code.py            # seed program
       result.json        # score, is_valid, feedback, metrics, evaluator extras, optional analysis fields
+      raw-artifact.json  # optional trajectory sidecar (store_raw_artifacts: true)
     attempt_0001/
       code.py
       result.json
@@ -79,7 +105,7 @@ Each workspace can maintain an append-only JSONL log of score progress. This is 
 | `submit` | Each new archive entry (from `submit.py` or poll backfill) |
 | `backfill` | Historical attempts synced at session start |
 | `session_start` / `session_end` | OpenCode session boundaries |
-| `auto_resume` | alpha-diagnosis restarted OpenCode after agent early exit |
+| `auto_resume` | Framework restarted OpenCode after agent early exit (when `auto_resume_on_early_exit: true`) |
 | `stuck` | alpha-diagnosis killed a stuck session |
 | `discovery_start` / `discovery_end` | Diagnostic rule discovery cycle |
 
@@ -116,16 +142,22 @@ sync_archive_to_trajectory(ws, ws / 'archive', maximize=True, event='backfill')
 6. Repeat until the budget is exhausted or the agent stops.
 7. Framework saves `best_program.py` from the best valid archive entry.
 
+In **PRO mode** (`mode: pro`), step 5–6 expand: after each submit the agent must improve `analyzer.py` (reading `raw-artifact.json`), test with `python rerun_analyzer.py`, then improve `candidate.py`.
+
 ## Config format
 
 ```yaml
 project_name: my_problem
+mode: standard              # standard (default) | pro
 maximize: true
+store_raw_artifacts: true   # required for PRO; writes raw-artifact.json per attempt
 
 problem: problem.md
 initial_program: initial_program.py
 evaluator: evaluator.py
-analyzer: analyzer.py             # optional
+analyzer: analyzer.py             # optional (required when mode: pro)
+analyzer_max_feedback_lines: 40    # optional hard cap for processed_feedback lines
+target_score: 0.95                 # optional run goal injected into problem.md and prompt
 
 max_improvements: 10          # new submissions after seed
 agent_timeout_seconds: 3600   # total OpenCode session timeout
@@ -143,6 +175,10 @@ opencode:
 `iterations` is accepted as an alias for `max_improvements` for backward compatibility.
 
 `agent_readable_evaluator` controls whether the agent can read `evaluator.py` in the workspace. When `false`, the evaluator is stored as a hidden `_evaluator.py` file and the prompt instructs the agent to rely on `problem.md` and submit feedback only.
+
+`target_score` is optional. When set, the generated workspace `problem.md` and run prompts tell the agent to keep iterating toward that score within the submission budget. For maximization tasks the target means `score >= target_score`; for minimization tasks it means `score <= target_score`.
+
+`auto_resume_on_early_exit` (default `true`) keeps the run going when the agent exits early but improvement budget remains. By default it uses OpenCode `--continue` / `--session` so the **same conversation memory** is preserved (`auto_resume_mode: continue`). The same applies when you later run `agentic-evolve run --resume`: it re-attaches to the prior OpenCode session when possible (saved `opencode_session.json`, or recovered from `agent_*.log`). Set `auto_resume_mode: new_session` to restart with a fresh OpenCode session instead. Look for `session_start` / `auto_resume` events in `score_trajectory.jsonl` (`resume_mode: continue` or `session`).
 
 ## Create a new problem
 
@@ -174,6 +210,10 @@ def analyze(program_path: str, output_dir: str, result: dict, archive_dir: str, 
 ```
 
 `analyzer.py` is copied into the workspace and may be edited by the agent. Its output is appended to each new `result.json`; analyzer failures do not change the evaluator score. Existing archives remain readable without these fields.
+
+Set `analyzer_max_feedback_lines` to hard-cap analyzer `processed_feedback` after each submit and after `rerun_analyzer.py`. Separately, `prompt_history_max_feedback_chars` only truncates feedback when building the next prompt history; it does not change what is saved in archive results.
+
+In PRO mode, use `python rerun_analyzer.py [attempt_id]` to refresh `processed_feedback` after editing `analyzer.py` without re-evaluating the candidate.
 
 Evaluators may include extra JSON-serializable fields in their return dict. For example, a packing evaluator can return `construction: {"centers": centers, "radii": radii}` so `analyzer.py` can inspect the exact output that was scored without rerunning `code.py`.
 

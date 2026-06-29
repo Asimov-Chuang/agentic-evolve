@@ -1,0 +1,26 @@
+project_name: manned_lunar_landing_pro2
+mode: pro
+maximize: true
+store_raw_artifacts: true
+
+problem: problem.md
+initial_program: initial_program.py
+evaluator: evaluator.py
+analyzer: analyzer_pro.py
+target_score: 7500
+opencode_config: ../../opencode.cloudgpt.json
+
+agent_readable_evaluator: false
+max_improvements: 100
+agent_timeout_seconds: 10800
+evaluation_timeout_seconds: 300
+verbose: false
+
+opencode:
+  command: opencode
+  model: cloudgpt/DeepSeek-V4-Pro
+  small_model: cloudgpt/DeepSeek-V4-Pro
+  args:
+    - run
+    - json
+    - --dangerously-skip-permissions

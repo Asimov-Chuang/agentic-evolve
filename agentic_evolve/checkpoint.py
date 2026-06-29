@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from agentic_evolve.archive import Archive, Attempt
+from agentic_evolve.archive import Archive, Attempt, read_improvement_baseline
 
 
 CHECKPOINT_VERSION = 1
@@ -42,9 +42,11 @@ class Checkpoint:
         evaluation_timeout_seconds: int,
         config_path: str,
         status: str = "paused",
+        improvement_baseline: int = 1,
     ) -> Checkpoint:
         best = archive.best()
         count = archive.submission_count()
+        baseline = max(1, improvement_baseline)
         return cls(
             version=CHECKPOINT_VERSION,
             project_name=project_name,
@@ -52,8 +54,10 @@ class Checkpoint:
             max_improvements=max_improvements,
             evaluation_timeout_seconds=evaluation_timeout_seconds,
             attempt_count=count,
-            submissions_after_seed=max(0, count - 1),
-            remaining_improvements=archive.remaining_improvements(max_improvements),
+            submissions_after_seed=max(0, count - baseline),
+            remaining_improvements=archive.remaining_improvements(
+                max_improvements, baseline=baseline
+            ),
             best_attempt_id=best.attempt_id if best else None,
             best_score=best.score if best else None,
             best_is_valid=bool(best.is_valid) if best else False,
@@ -166,3 +170,22 @@ def format_checkpoint_summary(checkpoint: Checkpoint, archive: Archive) -> str:
     if best:
         lines.append(f"current archive best: {best.attempt_id} score={best.score:.6f}")
     return "\n".join(lines)
+
+
+def save_run_checkpoint(
+    config_path: str,
+    config,
+    archive: Archive,
+    status: str,
+) -> None:
+    checkpoint = Checkpoint.from_archive(
+        archive,
+        project_name=config.project_name,
+        maximize=config.maximize,
+        max_improvements=config.max_improvements,
+        evaluation_timeout_seconds=config.evaluation_timeout_seconds,
+        config_path=str(Path(config_path).resolve()),
+        status=status,
+        improvement_baseline=read_improvement_baseline(config.workspace_dir),
+    )
+    save_checkpoint(checkpoint, config.workspace_dir)

@@ -1,0 +1,153 @@
+{# Pro synthesis injection v2: gap analysis, co-occurrence, synthesis seeds #}
+
+---
+
+## Pro diagnostic synthesis (Cycle {{ cycle }})
+
+Use the structured evidence below to design **combined** controller variants. Do **not** submit isolated one-rule tweaks or repeats of the baseline structure.
+
+{% if include_rule_weights %}
+**Score association:** **positive** = encourage; **negative** = avoid entirely.
+{% endif %}
+
+**Baseline:** `{{ baseline_attempt_id }}` — score **{{ "%.4f"|format(baseline_score) if baseline_score is not none else "unknown" }}**
+
+---
+
+## Hard constraints (must follow)
+
+1. **Do not beat a dead horse:** Baseline already implements these positive patterns — do **not** submit variants whose *only* change is tuning these:
+{% if baseline_satisfied_rules %}
+{% for name in baseline_satisfied_rules %}
+   - {{ name }}
+{% endfor %}
+{% else %}
+   - (none detected)
+{% endif %}
+2. **Required novelty:** Each proposal must implement **at least {{ min_new_positive_rules }} positive pattern(s)** from the *missing* list below that baseline lacks.
+3. **Forbidden patterns:** Never implement negative patterns{% if baseline_satisfied_negative %} (baseline already triggers: {{ baseline_satisfied_negative | join(", ") }} — do not amplify){% endif %}.
+4. **No IIR-only stacking:** If baseline is strong IIR (`rule_has_strong_iir_blend`), do **not** add `smooth_reconstructor` on top of the same IIR without a **different control path** (e.g. delta computation + rate limit, sublinear damping, delay compensation via `control_model`).
+5. **Structural change required:** Proposals that score ≤ baseline with the same architecture will be discarded — pivot to a different synthesis seed or co-occurrence combo.
+
+---
+
+## Baseline gap analysis
+
+### Already satisfied (do not re-implement alone)
+{% if baseline_satisfied_rules %}
+{% for name in baseline_satisfied_rules %}
+- {{ name }}
+{% endfor %}
+{% else %}
+- none
+{% endif %}
+
+### Missing positive patterns (prioritize combining these)
+{% if baseline_missing_descriptions %}
+{% for desc in baseline_missing_descriptions %}
+- {{ desc }}
+{% endfor %}
+{% else %}
+- (none — focus on novel parameterizations of co-occurring combos)
+{% endif %}
+
+---
+
+## Part A — Synthesis seeds (attempts that add missing patterns)
+
+These archive attempts satisfy **at least one positive pattern baseline lacks**. Use them as starting points for combination — adapt, do not copy verbatim.
+
+{% if synthesis_seeds %}
+{% for seed in synthesis_seeds %}
+### Seed: `{{ seed.attempt_id }}` (score {{ "%.4f"|format(seed.score) }})
+**Adds missing patterns:** {{ seed.added_positive_rules | join(", ") }}
+**All satisfied:** {{ seed.satisfied_rule_names | join(", ") }}
+
+```python
+{{ seed.code_excerpt }}
+```
+{% endfor %}
+{% else %}
+*(No seeds found — combine exemplars from Part B/C manually.)*
+{% endif %}
+
+---
+
+## Part B — High-scoring positive rule co-occurrence
+
+Patterns that **appear together** in top archive attempts (combo size {{ cooccurrence_min_rules }}–{{ cooccurrence_max_rules }}):
+
+{% if rule_cooccurrence %}
+| Rules combined | Seen in | Best score | Best attempt |
+|----------------|---------|------------|--------------|
+{% for combo in rule_cooccurrence %}
+| {{ combo.rule_names | join(" + ") }} | {{ combo.attempt_count }} attempt(s), avg {{ "%.4f"|format(combo.avg_score) }} | {{ "%.4f"|format(combo.best_score) }} | {{ combo.best_attempt_id }} |
+{% endfor %}
+{% else %}
+*(Insufficient co-occurrence data — use Part C exemplars.)*
+{% endif %}
+
+**Guidance:** Prefer proposals that merge a co-occurrence combo **with** at least one baseline-missing pattern.
+
+---
+
+## Part C — Per-pattern exemplars (positive rules only)
+
+Up to {{ exemplars_per_rule }} high-scoring attempts per **positive** pattern (baseline excluded). Negative patterns have no exemplars — avoid them.
+
+{% for rule in rules %}
+{% if rule.score_effect != "negative" %}
+### {{ rule.name }}
+{{ rule.description }}
+
+{% set exemplars = rule_exemplars.get(rule.index, []) %}
+{% if exemplars %}
+{% for ex in exemplars %}
+**`{{ ex.attempt_id }}`** (score {{ "%.4f"|format(ex.score) }}): {{ ex.rule_explanation }}
+
+```python
+{{ ex.code_excerpt }}
+```
+{% endfor %}
+{% else %}
+*(No exemplar — infer from description or synthesis seeds.)*
+{% endif %}
+
+{% endif %}
+{% endfor %}
+
+---
+
+## Part D — Top-{{ top_k }} coverage matrix
+
+| Attempt | Score | Rules satisfied |
+|---------|-------|-----------------|
+{% for row in top_k_coverage %}
+| {{ row.attempt_id }} | {{ "%.4f"|format(row.score) }} | {% if row.satisfied_rule_names %}{{ row.satisfied_rule_names | join(", ") }}{% else %}none{% endif %} |
+{% endfor %}
+
+{% for row in top_k_coverage %}
+#### {{ row.attempt_id }} ({{ "%.4f"|format(row.score) }})
+```python
+{{ row.code_excerpt }}
+```
+{% endfor %}
+
+---
+
+## Your task — phased synthesis
+
+Target: **score > {{ "%.4f"|format(baseline_score) if baseline_score is not none else "baseline" }}**
+
+| Phase | Deliverable |
+|-------|-------------|
+| **Proposal 1** | Pick one **synthesis seed** or **co-occurrence combo** + ≥{{ min_new_positive_rules }} missing positive patterns; submit and read feedback |
+| **Proposal 2** | Alternative architecture (different seed/combo), still ≥{{ min_new_positive_rules }} missing patterns |
+| **Proposal 3** | Refine the better of 1/2 (parameter or structure tweak) |
+
+Rules:
+- Write `candidate.py`, run `python submit.py candidate.py` after each change.
+- If a submission scores below baseline, **change architecture** (not just constants on the same IIR/smooth_rec stack).
+- Use remaining quota to iterate on the best synthesis direction.
+
+Begin Proposal 1 now.

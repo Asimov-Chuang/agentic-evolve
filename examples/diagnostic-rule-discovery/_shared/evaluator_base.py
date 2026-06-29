@@ -18,7 +18,13 @@ import numpy as np
 
 DEFAULT_PROGRAM_TIMEOUT_SECONDS = 600
 CACHE_FILENAME = "dataset_cache_policy_visible.pkl"
-FORBIDDEN_STEP_KEYS = frozenset({"common", "rewards"})
+FORBIDDEN_STEP_KEYS = frozenset({"common", "rewards", "diagnostics"})
+FORBIDDEN_OPTICS_ROOT_KEYS = frozenset(
+    {"baseline", "reference", "score_0_to_1_higher_is_better", "aggregate"}
+)
+FORBIDDEN_EV2GYM_ROOT_KEYS = frozenset(
+    {"score", "mean_energy_user_satisfaction", "mean_total_reward", "mean_total_profits"}
+)
 
 
 def strip_policy_visible_sustaindc(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -75,6 +81,105 @@ def strip_policy_visible_general_meio(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def strip_policy_visible_optics(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep AO policy-visible fields: per-step slopes/prev_commands and cmd actions."""
+    scenarios_out: List[Dict[str, Any]] = []
+    for block in raw.get("scenarios", []):
+        steps_out: List[Dict[str, Any]] = []
+        for step in block.get("steps", []):
+            steps_out.append(
+                {
+                    "step": step.get("step"),
+                    "observations": dict(step.get("observations") or {}),
+                    "actions": dict(step.get("actions") or {}),
+                }
+            )
+        scenarios_out.append(
+            {
+                "episode": block.get("episode"),
+                "steps": steps_out,
+            }
+        )
+    return {
+        "n_act": raw.get("n_act"),
+        "control_model": dict(raw.get("control_model") or {}),
+        "scenarios": scenarios_out,
+    }
+
+
+def strip_policy_visible_ev2gym(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep EV2Gym policy-visible fields: per-step case observations and port actions."""
+    scenarios_out: List[Dict[str, Any]] = []
+    for block in raw.get("scenarios", []):
+        steps_out: List[Dict[str, Any]] = []
+        for step in block.get("steps", []):
+            steps_out.append(
+                {
+                    "step": step.get("step"),
+                    "observations": dict(step.get("observations") or {}),
+                    "actions": dict(step.get("actions") or {}),
+                }
+            )
+        scenarios_out.append(
+            {
+                "case_id": block.get("case_id"),
+                "seed": block.get("seed"),
+                "steps": steps_out,
+            }
+        )
+    return {"scenarios": scenarios_out}
+
+
+def strip_policy_visible_pid_tuning(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep PID tuning policy-visible fields: gains and per-scenario aggregates."""
+    scenarios_out: List[Dict[str, Any]] = []
+    for block in raw.get("scenarios", []):
+        scenarios_out.append(
+            {
+                "name": block.get("name"),
+                "itae": block.get("itae"),
+                "inv_itae": block.get("inv_itae"),
+                "feasible": block.get("feasible"),
+                "duration": block.get("duration"),
+                "wind": list(block.get("wind") or [0.0, 0.0]),
+            }
+        )
+    return {
+        "gains": dict(raw.get("gains") or {}),
+        "scenarios": scenarios_out,
+        "gain_bounds": dict(raw.get("gain_bounds") or {}),
+        "constraints": dict(raw.get("constraints") or {}),
+        "combined_score": raw.get("combined_score"),
+        "feasible": raw.get("feasible"),
+    }
+
+
+def strip_policy_visible_high_reliable_simulation(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep repeat-level evaluation traces and public aggregate metrics."""
+    dev_constants = dict(raw.get("dev_constants") or {})
+    repeats_out: List[Dict[str, Any]] = []
+    for block in raw.get("repeats", []):
+        repeats_out.append(
+            {
+                "repeat": block.get("repeat"),
+                "seed": block.get("seed"),
+                "runtime_s": block.get("runtime_s"),
+                "err_rate_log": block.get("err_rate_log"),
+                "err_ratio": block.get("err_ratio"),
+                "actual_samples": block.get("actual_samples"),
+                "actual_std": block.get("actual_std"),
+                "converged": block.get("converged"),
+            }
+        )
+    aggregate = dict(raw.get("aggregate") or {})
+    return {
+        "dev_constants": dev_constants,
+        "repeats": repeats_out,
+        "aggregate": aggregate,
+        "combined_score": raw.get("combined_score"),
+    }
+
+
 def _workspace_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -96,20 +201,25 @@ def _evaluation_timeout_seconds(workspace: Path | None = None) -> int:
     return int(meta.get("evaluation_timeout_seconds", DEFAULT_PROGRAM_TIMEOUT_SECONDS))
 
 
-def _validate_program_uses_policy_visible_only(program_path: str) -> str | None:
+def _validate_program_uses_policy_visible_only(
+    program_path: str,
+    *,
+    extra_forbidden: frozenset[str] | None = None,
+) -> str | None:
     source = Path(program_path).read_text(encoding="utf-8")
     try:
         tree = ast.parse(source)
     except SyntaxError as exc:
         return f"Syntax error in program: {exc}"
 
+    forbidden = FORBIDDEN_STEP_KEYS | (extra_forbidden or frozenset())
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id in FORBIDDEN_STEP_KEYS:
+        if isinstance(node, ast.Name) and node.id in forbidden:
             return (
                 f"Program must not reference forbidden field {node.id!r}. "
                 "Rules may use only observations and actions (policy-visible trace)."
             )
-        if isinstance(node, ast.Constant) and node.value in FORBIDDEN_STEP_KEYS:
+        if isinstance(node, ast.Constant) and node.value in forbidden:
             return (
                 f"Program must not reference forbidden field {node.value!r}. "
                 "Rules may use only observations and actions (policy-visible trace)."
@@ -277,6 +387,7 @@ def evaluate_core(
     workspace: Path,
     *,
     strip_fn: Callable[[Dict[str, Any]], Dict[str, Any]] | None = None,
+    extra_forbidden: frozenset[str] | None = None,
 ) -> dict:
     os.makedirs(output_dir, exist_ok=True)
     strip = strip_fn or strip_policy_visible_sustaindc
@@ -294,7 +405,9 @@ def evaluate_core(
         return _failure_result(f"dataset_dir not found: {dataset_dir}")
 
     rule_set_size = int(rule_set_size)
-    forbidden = _validate_program_uses_policy_visible_only(program_path)
+    forbidden = _validate_program_uses_policy_visible_only(
+        program_path, extra_forbidden=extra_forbidden
+    )
     if forbidden:
         return _failure_result(forbidden)
     try:

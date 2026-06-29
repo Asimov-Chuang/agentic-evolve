@@ -1,0 +1,35 @@
+name: optics_temporal_smooth_rf_alpha
+adapter: adapters/adaptive_temporal_smooth_control.yaml
+store_raw_artifacts: true
+
+primary:
+  config: ../examples/adaptive_temporal_smooth_control/config_rich_feedback.yaml
+  project_name: optics_temporal_smooth_mode_detection
+  store_raw_artifacts: true
+
+stuck:
+  consecutive_no_improvement: 15
+  poll_interval_seconds: 5
+
+discovery:
+  mode: regression
+  task_dir: ../examples/diagnostic-rule-discovery/adaptive_temporal_smooth_control
+  rule_set_size: 8
+  source_top_n: 30
+  runs: 1
+  max_improvements: 20
+  fresh_each_run: true
+  early_injection_r2_threshold: 0.99
+
+injection:
+  mode: counterfactual
+  include_rule_weights: true
+  max_submissions: 10
+  quota_tolerance: 2
+  cf_top_k_attempts: 15
+  cf_max_code_lines: 40
+
+loop:
+  max_diagnosis_cycles: 10
+  resume_after_injection: true
+  auto_resume_on_early_exit: true

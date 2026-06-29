@@ -1,0 +1,22 @@
+project_name: diagnostic_rule_discovery_ev2gym_rf6
+maximize: true
+
+source_archive: ../ev2gym_smart_charging/outputs/ev2gym_smart_charging_rich_feedback/archive
+source_archive_top_n: 30
+rule_set_size: 6
+
+problem: ev2gym_smart_charging/problem.md
+initial_program: ev2gym_smart_charging/initial_program.py
+evaluator: ev2gym_smart_charging/evaluator.py
+
+agent_readable_evaluator: true
+max_improvements: 50
+agent_timeout_seconds: 3600
+evaluation_timeout_seconds: 600
+verbose: false
+
+opencode:
+  command: opencode
+  args:
+    - run
+    - --dangerously-skip-permissions

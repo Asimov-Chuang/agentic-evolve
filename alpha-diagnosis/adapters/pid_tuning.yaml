@@ -1,0 +1,5 @@
+task_id: pid_tuning
+trajectory_format: pid_tuning_raw_artifact
+rule_description_source: metrics.rule_descriptions
+prompt_template: templates/rule_guided_prompt.md.j2
+factor_label_style: numbered

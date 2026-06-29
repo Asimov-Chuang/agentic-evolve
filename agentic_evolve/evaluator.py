@@ -33,6 +33,7 @@ def run_evaluation(
     analyzer_path: Path | None = None,
     archive_dir: Path | None = None,
     workspace_dir: Path | None = None,
+    analyzer_max_feedback_lines: int | None = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     result_path = output_dir / "evaluation_result.json"
@@ -70,6 +71,7 @@ def run_evaluation(
             archive_dir=archive_dir or output_dir.parent,
             workspace_dir=workspace_dir or output_dir.parent,
             timeout_seconds=timeout_seconds,
+            max_feedback_lines=analyzer_max_feedback_lines,
         )
         result.update(analysis)
 

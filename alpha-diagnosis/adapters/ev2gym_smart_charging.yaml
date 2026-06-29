@@ -1,0 +1,5 @@
+task_id: ev2gym_smart_charging
+trajectory_format: ev2gym_raw_artifact
+rule_description_source: metrics.rule_descriptions
+prompt_template: templates/rule_guided_prompt.md.j2
+factor_label_style: numbered

@@ -1,0 +1,5 @@
+task_id: adaptive_temporal_smooth_control
+trajectory_format: optics_temporal_smooth_raw_artifact
+rule_description_source: metrics.rule_descriptions
+prompt_template: templates/rule_guided_prompt_mode_detection.md.j2
+factor_label_style: numbered
